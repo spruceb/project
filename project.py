@@ -116,21 +116,39 @@ class Project:
         streaks = []
         current_streak = []
         for dates in self.data.date_list:
+            date = None
             if len(dates) == 1:
                 date = dates[0]
             if not current_streak:
-                current_streak.append(date)
+                current_streak.append(dates if date is None else date)
                 continue
             else:
-                if consecutive(date, current_streak[-1]):
-                    current_streak.append(date)
+                if (consecutive(dates[0], current_streak[-1]) or
+                        same_day(dates[0], current_streak[-1])):
+                    current_streak.append(dates if date is None else date)
                 else:
                     streaks.append(current_streak)
                     current_streak = []
         if current_streak:
             streaks.append(current_streak)
         return streaks
-    
+
+    @property
+    def _day_streaks(self):
+        streaks = self._streak_groups
+        day_streaks = []
+        for streak in streaks:
+            current_streak = []
+            for item in streak:
+                date = item
+                if not isinstance(item, arrow.Arrow):
+                    date = item[0]
+                if not current_streak or consecutive(date, current_streak[-1]):
+                    current_streak.append(date.date())
+            day_streaks.append(current_streak)
+        return day_streaks
+                           
+        
     def _squash_days(self, streak_group):
         squashed = []
         start_time = streak_group[0]
@@ -156,7 +174,7 @@ class Project:
         last_streak = streaks[-1]
         last_entry = last_streak[-1]
         if consecutive(today, last_entry) or same_day(today, last_entry):
-            return len(self._squash_days(last_streak))
+            return len(self._day_streaks[-1])
         return 0
 
     @property

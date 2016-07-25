@@ -13,7 +13,7 @@ class DataPoint:
     """Wrapper around dates or pairs of dates"""
     def __init__(self):
         pass
-    
+
 class DataManager:
     def __init__(self, filepath):
         self.filepath = filepath
@@ -21,7 +21,7 @@ class DataManager:
             open(filepath, 'w').close()
         self._date_list = None
         self._file_modified = False
-        
+
     def add_date(self, date):
         with open(self.filepath, 'a', newline='') as writef:
             writer = csv.writer(writef)
@@ -39,7 +39,7 @@ class DataManager:
         return self._date_list
 
     def add_timerange(self, start, end):
-        with open(self.filepath, 'a', newline='' as writef):
+        with open(self.filepath, 'a', newline='') as writef:
             writer = csv.writer(writef)
             writer.writerow([str(start), str(end)])
         self._file_modified = True
@@ -64,7 +64,7 @@ class ConfigManager:
     def _save_data(self):
         with open(filepath, 'w') as f:
             json.dump(self._data, f)
-        
+
 class CacheManager:
     def __init__(self, filepath):
         self.filepath = filepath
@@ -73,11 +73,11 @@ class CacheManager:
                 json.dump({'last_date': None}, cache)
         with open(filepath, 'r+') as f:
             self._data = json.load(f)
-            
+
     @property
     def last_date(self):
         return arrow.get(self._data['last_date'])
-    
+
     @last_date.setter
     def last_date(self, value):
         self._data['last_date'] = str(value)
@@ -91,11 +91,11 @@ class CacheManager:
     @start_time.setter
     def start_time(self, value):
         self._data['start_time'] = str(value)
-        
+
     def _save_data(self):
         with open(self.filepath, 'w') as f:
             json.dump(self._data, f)
-    
+
 
 class Project:
     def __init__(self, config_path, time_interval='days'):
@@ -115,7 +115,9 @@ class Project:
     def _streak_groups(self):
         streaks = []
         current_streak = []
-        for date in self.data.date_list:
+        for dates in self.data.date_list:
+            if len(dates) == 1:
+                date = dates[0]
             if not current_streak:
                 current_streak.append(date)
                 continue
@@ -125,18 +127,37 @@ class Project:
                 else:
                     streaks.append(current_streak)
                     current_streak = []
-        return streaks        
-        
+        if current_streak:
+            streaks.append(current_streak)
+        return streaks
+    
+    def _squash_days(self, streak_group):
+        squashed = []
+        start_time = streak_group[0]
+        for item in streak_group[1:]:
+            if isinstance(item, arrow.Arrow):
+                end_time = item
+            else:
+                end_time = item[-1]
+            if same_day(today, last_entry):
+                start_time = end_time
+            else:
+                squashed.append(start_time)
+                start_time = end_time
+        squashed.append(start_time)
+        return squashed
+
     @property
-    def streak(self):        
+    def streak(self):
         today = arrow.now()
         streaks = self._streak_groups
         if not streaks or not any(streaks):
             return 0
         last_streak = streaks[-1]
         last_entry = last_streak[-1]
-        if consecutive(today, last_entry) or today.date() == last_entry.date():
-            
+        if consecutive(today, last_entry) or same_day(today, last_entry):
+            return len(self._squash_days(last_streak))
+        return 0
 
     @property
     def start_time(self):
@@ -145,7 +166,7 @@ class Project:
     @start_time.setter
     def start_time(self, value):
         self.cache.start_time = value
-    
+
     def start(self, overwrite=False):
         now = arrow.now()
         if (self.start_time is None or not same_day(now, self.start_time)
@@ -161,19 +182,18 @@ class Project:
     def close(self):
         self.config._save_data()
         self.cache._save_data()
-    
-        
+
+
 def same_day(*datetimes):
     return reduce(operator.eq, map(lambda x: x.date(), datetimes))
 
 def consecutive(first, second):
     return abs(first.toordinal() - second.toordinal()) == 1
-    
-    
+
+
 @click.group()
-@click.option('--debug-time-period', default=None)
 @click.pass_context
-def cli(context, debug_time_period):
+def cli(context, debug_time_period=None):
     project = Project('config.json')
     context.obj['project'] = project
 
@@ -197,10 +217,10 @@ def config(context):
 def start():
     pass
 
-def stop():    
+def stop():
     pass
 
 if __name__ == "__main__":
     obj = {}
-    cli(obj)
+    cli(obj=obj)    
     obj['project'].close()

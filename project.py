@@ -128,7 +128,7 @@ class Project:
                     current_streak.append(dates if date is None else date)
                 else:
                     streaks.append(current_streak)
-                    current_streak = []
+                    current_streak = [date]
         if current_streak:
             streaks.append(current_streak)
         return streaks
@@ -146,35 +146,18 @@ class Project:
                 if not current_streak or consecutive(date, current_streak[-1]):
                     current_streak.append(date.date())
             day_streaks.append(current_streak)
-        return day_streaks
-                           
-        
-    def _squash_days(self, streak_group):
-        squashed = []
-        start_time = streak_group[0]
-        for item in streak_group[1:]:
-            if isinstance(item, arrow.Arrow):
-                end_time = item
-            else:
-                end_time = item[-1]
-            if same_day(today, last_entry):
-                start_time = end_time
-            else:
-                squashed.append(start_time)
-                start_time = end_time
-        squashed.append(start_time)
-        return squashed
+        return day_streaks                           
 
     @property
     def streak(self):
         today = arrow.now()
-        streaks = self._streak_groups
+        streaks = self._day_streaks
         if not streaks or not any(streaks):
             return 0
         last_streak = streaks[-1]
         last_entry = last_streak[-1]
         if consecutive(today, last_entry) or same_day(today, last_entry):
-            return len(self._day_streaks[-1])
+            return len(streaks[-1])
         return 0
 
     @property
@@ -201,14 +184,35 @@ class Project:
         self.config._save_data()
         self.cache._save_data()
 
-
+def all_dates(*datetimes_and_dates):
+    return map(lambda x: x.date() if hasattr(x, 'date') else x,
+               datetimes_and_dates)
 def same_day(*datetimes):
-    return reduce(operator.eq, map(lambda x: x.date(), datetimes))
+    return reduce(operator.eq, all_dates(*datetimes))
 
 def consecutive(first, second):
     return abs(first.toordinal() - second.toordinal()) == 1
 
 
+def color_string(string, color):
+    return '\033[{}m{}\033[0m'.format(color, string)
+    
+def print_streak_string(streak_lists):
+    total_string = ''
+    last_end = None
+    for streak in streak_lists:
+        if last_end is not None:
+            time_difference = (streak[0] - last_end).days
+            total_string += color_string('◻' * time_difference, '31;1')            
+        total_string += color_string('◼' * len(streak), '0;32')
+        # total_string += ' '
+        last_end = streak[-1]
+    today = arrow.now()
+    if today.date() > last_end:
+        time_difference = (today.date() - last_end).days
+        total_string += color_string('◻' * time_difference, '31;1')
+    print(total_string)
+    
 @click.group()
 @click.pass_context
 def cli(context, debug_time_period=None):
@@ -226,6 +230,13 @@ def finish(context):
 def streak(context):
     project = context.obj['project']
     print(project.streak)
+    print_streak_string(project._day_streaks)
+
+@cli.command()
+@click.pass_context
+def debug(context):
+    project = context.obj['project']
+    import pdb; pdb.set_trace()
 
 @cli.command()
 @click.pass_context

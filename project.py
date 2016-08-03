@@ -31,8 +31,7 @@ dealing with both.
 
 There's a clear opportunity for abstraction in the `Manager` classes.
 """
-import arrow
-import click
+import atexit
 import csv
 import itertools as it
 import json
@@ -40,6 +39,9 @@ import operator
 import os
 import os.path
 from functools import reduce
+
+import arrow
+import click
 
 class DataPoint:
     """Wrapper around dates or pairs of dates. TODO: fill in and use"""
@@ -121,7 +123,7 @@ class ConfigManager:
 
     def _save_data(self):
         """Persist data that may have changed during runtime"""
-        with open(filepath, 'w') as f:
+        with open(self.filepath, 'w') as f:
             json.dump(self._data, f)
 
 class CacheManager:
@@ -155,7 +157,7 @@ class CacheManager:
     @property
     def start_time(self):
         """Get the start time of the current timerange (if it exists)"""
-        start_time = self._data['start_time']
+        start_time = self._data.get('start_time')
         if start_time is not None:
             return arrow.get(start_time)
 
@@ -296,9 +298,11 @@ class Project:
         if self.start_time is not None and same_day(self.start_time, now):
             self.data.add_timerange(self.start_time, now)
             self.start_time = None
+        return now
 
     def close(self):
         """Persist data that may have changed during runtime"""
+        print('called')
         self.config._save_data()
         self.cache._save_data()
 
@@ -333,7 +337,8 @@ def print_streak_string(streak_lists):
     today = arrow.now()
     if today.date() > last_end:
         time_difference = (today.date() - last_end).days
-        total_string += color_string('◻' * time_difference, '31;1')
+        total_string += color_string('◻' * (time_difference - 1), '31;1')
+        total_string += '◻'
     print(total_string)
 
 # Below are the command line interface functions, using the `click` library.
@@ -344,8 +349,7 @@ def print_streak_string(streak_lists):
 @click.group()
 @click.pass_context
 def cli(context, debug_time_period=None):
-    project = Project('config.json')
-    context.obj['project'] = project
+    pass
 
 @cli.command()
 @click.pass_context
@@ -363,7 +367,7 @@ def streak(context):
 @cli.command()
 @click.pass_context
 def debug(context):
-    """Debug the `Project` by giving PDB access to it
+    """Debug using PDB.
 
     The only non-`Project` CLI command
     """
@@ -375,13 +379,23 @@ def debug(context):
 def config(context):
     pass
 
-def start():
-    pass
+@cli.command()
+@click.pass_context
+def start(context):
+    project = context.obj['project']
+    project.start()
+    print(project.start_time.time())
 
-def stop():
-    pass
+@cli.command()
+@click.pass_context
+def stop(context):
+    project = context.obj['project']
+    end = project.stop()
+    print(end.time())
+    
 
 if __name__ == "__main__":
-    obj = {}
+    obj = {'project': Project('config.json')}
+    atexit.register(obj['project'].close)
     cli(obj=obj)    
     obj['project'].close()

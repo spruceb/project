@@ -16,20 +16,7 @@ the feeling of "I'll make up with lots of time on the weekends", which
 invariably falls though the cracks. However keeping track of specific timings
 is also useful, and so is supported as well.
 
-Work in progress.
-
-WIP NOTES: 
-Currently in a halfway state of supporting both dates (i.e. days)
-and time ranges (i.e. pairs of a start and end datetime). Time ranges work for
-the purposes of calculating streaks, but there is no way for the user to add
-them yet, and no way to query total time or the like. Additionally, currently
-pairs and dates are both stored and processed as `arrow.Arrow` objects in a 
-list (so a range is stored as a list of two such objects). Then the first
-`arrow` in the range is considered for streak purposes. These should be unified
-into `DataPoints`, or something similar, in the future, to clean up functions
-dealing with both.
-
-There's a clear opportunity for abstraction in the `Manager` classes.
+WIP
 """
 import atexit
 import csv
@@ -43,19 +30,178 @@ from functools import reduce
 import arrow
 import click
 
-class DataPoint:
-    """Wrapper around dates or pairs of dates. TODO: fill in and use"""
-    def __init__(self):
-        pass
+class Timeframe:
+    """Enum for possible units of time"""
+    year = 'year'
+    month = 'month'
+    week = 'week'
+    day = 'day'
+    hour = 'hour'
+    minute = 'minute'
+    second = 'second'
+
+
+class DatePoint:
+    """Wrapper around dates and date ranges"""
+
+    RANGE_INDICATORS = ('0', '1')
+    SEPERATOR_CHAR = ' '
+
+    def __init__(self, first_date, second_date=None):
+        """Create a new DatePoint from one or a pair of objects
+        
+        Possibilities: strings, Arrow dates, datetimes, DatePoint objects
+        """
+        if (isinstance(first_date, type(self)) and
+                isinstance(second_date, type(self))):
+            first_date = first_date._first_date
+            second_date = second_date._first_date
+        self._is_range = second_date is not None
+        self._first_date = arrow.get(first_date)
+        self._second_date = arrow.get(second_date)
+
+    @property
+    def is_range(self):
+        """Whether this is a range of dates or a single date"""
+        return self._is_range
+
+    def freeze(self):
+        """Return serialized string or byte version of self"""
+        header = self.RANGE_INDICATORS[self.is_range]
+        body = str(self._first_date)
+        if self.is_range:
+            body += self.SEPERATOR_CHAR + str(self._second_date)
+        return header + body
+
+    @classmethod
+    def unfreeze(cls, freezed):
+        """Create a DatePoint object from a frozen serialization of one"""
+        try:
+            is_range = cls.RANGE_INDICATORS.index(freezed[0])
+        except ValueError:
+            return
+        first_date = freezed[1:]
+        second_date = None
+        if is_range:
+            first_date, second_date = first_date.split(cls.SEPERATOR_CHAR)
+        return cls(first_date, second_date)
+
+    @classmethod
+    def now(cls):
+        """Get the current point in time as a DatePoint"""
+        return cls(arrow.now())
+
+    def ordinal(self, timeframe=Timeframe.day, use_start=True):
+        """Get an absolute version of the specified timeframe
+
+        That is, if the timeframe is years then the year, but if it's months
+        then the number of months since 0 C.E. rather than which month it is in
+        the given year. Likewise if days is the timeframe, then the Gregorian
+        total number of days, and if seconds then the current UNIX epoch.
+
+        These cannot be translated into other formats. Rather they are meant
+        for comparison, for telling exactly the difference in whatever unit
+        there are between two DatePoints
+        """
+        date = self._first_date if use_start else self._second_date
+        if timeframe == Timeframe.year:
+            return date.year
+        elif timeframe == Timeframe.month:
+            return date.year * 12 + date.month
+        elif timeframe == Timeframe.week:
+            iso = date.isocalender()
+            return iso[1]
+        elif timeframe == Timeframe.day:
+            return date.toordinal()
+        elif timeframe == Timeframe.hour:
+            return date.toordinal() * 24 + date.hour
+        elif timeframe == Timeframe.minute:
+            return date.timestamp // 60
+        elif timeframe == Timeframe.second:
+            return date.timestamp
+
+    def same(self, other, timeframe=Timeframe.day):
+        """If two DatePoints occurred in the same timeframe"""
+        return self.ordinal(timeframe) == other.ordinal(timeframe)
+
+    def consecutive(self, other, timeframe=Timeframe.day):
+        """If two DatePoints occurred on consecutive timeframes"""
+        return abs(self.ordinal(timeframe) - other.ordinal(timeframe)) == 1
+
+    def within_streak(self, other, timeframe=Timeframe.day):
+        """If two DatePoints have the same or consecutive timeframes"""
+        return self.same(other, timeframe) or self.consecutive(other, timeframe)
+
+    def after(self, other, timeframe=Timeframe.day):
+        """If this DatePoint's timeframe is after the others"""
+        return self.ordinal(timeframe) > other.ordinal(timeframe)
+
+    def before(self, other, timeframe=Timeframe.day):
+        """If this DatePoint's timeframe is before the others"""
+        return self.ordinal(timeframe) < other.ordinal(timeframe)
+
+    def date(self):
+        """The 'date' version of this DatePoint, i.e. without time info"""
+        return DatePoint(arrow.get(self._first_date.date()))
+
+    def time(self):
+        return self._first_date.time()
+    @property
+    def total_time(self):
+        """The time in seconds this represents
+
+        If it's not a range, it's considered to represent an hour. This
+        information being stored here is probably a bad idea and should
+        be decoupled."""
+        if self.is_range:
+            return (self._second_date - self._first_date).total_seconds()
+        return 3600
+
+    def __eq__(self, other):
+        if self._is_range != other._is_range:
+            return False
+        return (self._first_date == other._first_date and
+                self._second_date == other._second_date)
+
+    def __sub__(self, other):
+        return self._first_date - other._first_date
+
+    def __gt__(self, other):
+        return self._first_date > other._first_date
+
+    def __str__(self):
+        if self.is_range:
+            return '{} to {}'.format(self._first_date, self._second_date)
+        return str(self._first_date)
+
+    def __repr__(self):
+        return str(self)
+
+def binary_groupby(iterator, key):
+    """Return the iterator split based on a boolean 'streak' function"""
+    iterator = iter(iterator)
+    last_item = next(iterator)
+    result_list = [last_item]
+    for item in iterator:
+        if key(last_item, item):
+            result_list.append(item)
+        else:
+            if result_list:
+                yield result_list
+            result_list = [item]
+        last_item = item
+    if result_list:
+        yield result_list
+
+# TODO: below classes can clearly be abstracted down the line
 
 class DataManager:
     """Wraps the mechanism for persisting and querying work dates and times
-    
+
     The main features of this program rely on storage of dates and times during
     which personal project work has take place. The actual mechanism for
     storing this data is abstracted from the rest of the program. Here it is
-    a simple `csv` file, with the `str` outputs of `arrow.Arrow` objects stored
-    in it for easy retrieval.
+    a simple `csv` file, with 'frozen' DatePoints stored in it.
     """
     def __init__(self, filepath):
         """Create a new manager for the given `filepath`
@@ -69,29 +215,21 @@ class DataManager:
         self._file_modified = False
 
     def add_date(self, date):
-        """Append a new date to the date list"""
+        """Append a new DatePoint to the date list"""
         with open(self.filepath, 'a', newline='') as writef:
             writer = csv.writer(writef)
-            writer.writerow([str(date)])
+            writer.writerow([date.freeze()])
         self._file_modified = True
 
     @property
     def date_list(self):
-        """Get the list of `arrow.Arrow` dates this manager stores"""
+        """Get the list of DatePoints this manager stores"""
         if self._date_list is None or self._file_modified:
             with open(self.filepath, 'r', newline='') as reader:
                 reader = csv.reader(reader)
-                self._date_list = [[arrow.get(date) for date in datelist]
-                                   for datelist in reader]
+                self._date_list = [DatePoint.unfreeze(date[0]) for date in reader]
             self._file_modified = False
         return self._date_list
-
-    def add_timerange(self, start, end):
-        """Add a new timerange (start and end time) to the date list"""
-        with open(self.filepath, 'a', newline='') as writef:
-            writer = csv.writer(writef)
-            writer.writerow([str(start), str(end)])
-        self._file_modified = True
 
 class ConfigManager:
     """Manager for the configuration of this project
@@ -147,24 +285,28 @@ class CacheManager:
     @property
     def last_date(self):
         """Get the last date in the date list"""
-        return arrow.get(self._data['last_date'])
+        return DatePoint.unfreeze(self._data['last_date'])
 
     @last_date.setter
     def last_date(self, value):
         """Set what the last date is"""
-        self._data['last_date'] = str(value)
+        if value is not None:
+            value = value.freeze()
+        self._data['last_date'] = value
 
     @property
     def start_time(self):
         """Get the start time of the current timerange (if it exists)"""
         start_time = self._data.get('start_time')
         if start_time is not None:
-            return arrow.get(start_time)
+            return DatePoint.unfreeze(start_time)
 
     @start_time.setter
     def start_time(self, value):
         """Set the start time for a new timerange"""
-        self._data['start_time'] = str(value)
+        if value is not None:
+            value = value.freeze()
+        self._data['start_time'] = value
 
     def _save_data(self):
         """Persist data that may have changed during runtime"""
@@ -176,12 +318,12 @@ class Project:
     """Provides the programmatic interface of the function
 
     This is not the 'user interface', or even the 'MVC controller'. Rather
-    it's the 'API' of the application, the high level set of supported 
+    it's the 'API' of the application, the high level set of supported
     operations
     """
-    def __init__(self, config_path, time_interval='days'):
+    def __init__(self, config_path, timeframe=Timeframe.day):
         """Create a `Project` given a config filepath
-        
+
         Currently coupled to the managers in that it passes filenames to them.
         They should be decoupled later, perhaps by just being passed a
         `ConfigManager` that creates the others.
@@ -189,70 +331,34 @@ class Project:
         self.config = ConfigManager(config_path)
         self.cache = CacheManager(self.config.cache_path)
         self.data = DataManager(self.config.data_path)
+        self.finished_threshold = 3600
+        self.timeframe = timeframe
 
     def finish(self):
         """Record this day as finished >= one hour of personal project work"""
-        today = arrow.now()
-        self.data.add_date(today)
-        last_date = self.cache.last_date
-        if today > last_date:
+        today = DatePoint.now()
+        last_date = self.data.date_list[-1]
+        last_day_finished = self._data_is_finished(self._day_groups[-1])
+        if (today.after(last_date) or
+            today.same(last_date) and not last_day_finished):
+            self.data.add_date(today)
             self.cache.last_date = today
-
+            return today
+    
     @property
-    def _streak_groups(self):
-        """Get the dates grouped into streaks based on day
+    def _day_groups(self):
+        return list(binary_groupby(self.data.date_list, lambda x, y: x.same(y)))
 
-        So if the datelist contains three dates on the same day, another the
-        day after, and then another five days later, this will return the first
-        four in one list and the last date in a final, separate list
-        
-        Example:
-        [6-27T12:24, 6-27T16:45, 6-28, 7-1, 7-2] -> 
-            [[6-27T12:24, 6-27T16:45, 6-28], [7-1, 7-2]]
-        """
-        streaks = []
-        current_streak = []
-        for dates in self.data.date_list:
-            date = None
-            if len(dates) == 1:
-                date = dates[0]
-            if not current_streak:
-                current_streak.append(dates if date is None else date)
-                continue
-            else:
-                if (consecutive(dates[0], current_streak[-1]) or
-                        same_day(dates[0], current_streak[-1])):
-                    current_streak.append(dates if date is None else date)
-                else:
-                    streaks.append(current_streak)
-                    current_streak = [date]
-        if current_streak:
-            streaks.append(current_streak)
-        return streaks
-
+    def _data_is_finished(self, date_list):
+        """Check if the time of the DatePoints exceeds completion threshold"""
+        return sum(date.total_time for date in date_list) >= self.finished_threshold
+    
     @property
-    def _day_streaks(self):
-        """Get streak lists consisting only of distinct days
-
-        `_streak_groups` will include time ranges and dates that occurred on
-        the same day. This will return streak lists of dates (not datetimes)
-        without duplicate days. 
-
-        Example:
-        [6-27T12:24, 6-27T16:45, 6-28, 7-1, 7-2] -> [[6-27, 6-28], [7-1, 7-2]]
-        """
-        streaks = self._streak_groups
-        day_streaks = []
-        for streak in streaks:
-            current_streak = []
-            for item in streak:
-                date = item
-                if not isinstance(item, arrow.Arrow):
-                    date = item[0]
-                if not current_streak or consecutive(date, current_streak[-1]):
-                    current_streak.append(date.date())
-            day_streaks.append(current_streak)
-        return day_streaks                           
+    def _finished_streaks(self):
+        """Get list of streaks of DatePoints for consecutive finished days"""
+        date_points = (group[0].date() for group in self._day_groups
+                       if self._data_is_finished(group))
+        return list(binary_groupby(date_points, lambda x, y: x.within_streak(y)))
 
     @property
     def streak(self):
@@ -260,18 +366,17 @@ class Project:
 
         This streak is the 'current streak', i.e. the streak that still has the
         potential to be continued. If there is no such streak then this is 0.
-        This does not take into account how much time may have been spent, just
-        that the dates occur. Thus insufficiently small timeframes may be
-        counted as completed days. This will be fixed as further support for
-        timeframes is added.
+        This will check if enough time was logged in the day, so if there are
+        only timeranges that total 40min, it will not be counted as a completed
+        day.
         """
-        today = arrow.now()
-        streaks = self._day_streaks
+        today = DatePoint.now()
+        streaks = self._finished_streaks
         if not streaks or not any(streaks):
             return 0
         last_streak = streaks[-1]
         last_entry = last_streak[-1]
-        if consecutive(today, last_entry) or same_day(today, last_entry):
+        if today.within_streak(last_entry):
             return len(streaks[-1])
         return 0
 
@@ -287,57 +392,50 @@ class Project:
 
     def start(self, overwrite=False):
         """Start a new timeframe"""
-        now = arrow.now()
-        if (self.start_time is None or not same_day(now, self.start_time)
+        now = DatePoint.now()
+        if (self.start_time is None or not now.same(self.start_time)
                 or overwrite):
             self.start_time = now
+            return now
+        
 
     def stop(self):
         """End the current timeframe"""
-        now = arrow.now()
-        if self.start_time is not None and same_day(self.start_time, now):
-            self.data.add_timerange(self.start_time, now)
+        now = DatePoint.now()
+        if self.start_time is not None and now.same(self.start_time):
+            self.data.add_date(DatePoint(self.start_time, now))
             self.start_time = None
-        return now
+            return now
 
     def close(self):
         """Persist data that may have changed during runtime"""
-        print('called')
         self.config._save_data()
         self.cache._save_data()
-
-def all_dates(*datetimes_and_dates):
-    """Given a list of mixed datetimes and date objects, get them as dates"""
-    return map(lambda x: x.date() if hasattr(x, 'date') else x,
-               datetimes_and_dates)
-
-def same_day(*datetimes):
-    """Checks whether a list of datetimes all occurred on the same day"""
-    return reduce(operator.eq, all_dates(*datetimes))
-
-def consecutive(first, second):
-    """Check whether two datetimes occurred on consecutive days"""
-    return abs(first.toordinal() - second.toordinal()) == 1
 
 def color_string(string, color):
     """Get a terminal-escaped string for a certain color"""
     return '\033[{}m{}\033[0m'.format(color, string)
-    
-def print_streak_string(streak_lists):
+
+def print_streak_string(day_streak_lists):
     """Print the streaks with red and green squares representing day states"""
     total_string = ''
     last_end = None
-    for streak in streak_lists:
+    def finished(n):
+        return color_string('◼' * n, '0;32')
+    def unfinished(n):
+        return color_string('◻' * n, '31;1')
+
+    for streak in day_streak_lists:
         if last_end is not None:
             time_difference = (streak[0] - last_end).days
-            total_string += color_string('◻' * time_difference, '31;1')            
-        total_string += color_string('◼' * len(streak), '0;32')
+            total_string += unfinished(time_difference)
+        total_string += finished(len(streak))
         # total_string += ' '
         last_end = streak[-1]
-    today = arrow.now()
+    today = DatePoint.now()
     if today.date() > last_end:
         time_difference = (today.date() - last_end).days
-        total_string += color_string('◻' * (time_difference - 1), '31;1')
+        total_string += unfinished(time_difference - 1)
         total_string += '◻'
     print(total_string)
 
@@ -355,14 +453,18 @@ def cli(context, debug_time_period=None):
 @click.pass_context
 def finish(context):
     project = context.obj['project']
-    project.finish()
+    finish = project.finish()
+    if finish is None:
+        print('Already finished today')
+    else:
+        print('Finished', finish.date())
 
 @cli.command()
 @click.pass_context
 def streak(context):
     project = context.obj['project']
     print(project.streak)
-    print_streak_string(project._day_streaks)
+    print_streak_string(project._finished_streaks)
 
 @cli.command()
 @click.pass_context
@@ -383,19 +485,24 @@ def config(context):
 @click.pass_context
 def start(context):
     project = context.obj['project']
-    project.start()
-    print(project.start_time.time())
+    start = project.start()
+    if start is None:
+        print('Not started')
+    else:
+        print('Started at', project.start_time.time())
 
 @cli.command()
 @click.pass_context
 def stop(context):
     project = context.obj['project']
     end = project.stop()
-    print(end.time())
-    
+    if end is None:
+        print('Not stopped')
+    else:
+        print('Stopped at', end.time())
 
 if __name__ == "__main__":
     obj = {'project': Project('config.json')}
     atexit.register(obj['project'].close)
-    cli(obj=obj)    
+    cli(obj=obj)
     obj['project'].close()

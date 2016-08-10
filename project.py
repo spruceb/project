@@ -49,7 +49,7 @@ class DatePoint:
 
     def __init__(self, first_date, second_date=None):
         """Create a new DatePoint from one or a pair of objects
-        
+
         Possibilities: strings, Arrow dates, datetimes, DatePoint objects
         """
         if (isinstance(first_date, type(self)) and
@@ -344,7 +344,7 @@ class Project:
             self.data.add_date(today)
             self.cache.last_date = today
             return today
-    
+
     @property
     def _day_groups(self):
         return list(binary_groupby(self.data.date_list, lambda x, y: x.same(y)))
@@ -352,7 +352,7 @@ class Project:
     def _data_is_finished(self, date_list):
         """Check if the time of the DatePoints exceeds completion threshold"""
         return sum(date.total_time for date in date_list) >= self.finished_threshold
-    
+
     @property
     def _finished_streaks(self):
         """Get list of streaks of DatePoints for consecutive finished days"""
@@ -397,7 +397,7 @@ class Project:
                 or overwrite):
             self.start_time = now
             return now
-        
+
 
     def stop(self):
         """End the current timeframe"""
@@ -438,6 +438,20 @@ def print_streak_string(day_streak_lists):
         total_string += unfinished(time_difference - 1)
         total_string += '◻'
     print(total_string)
+
+def humanize_timedelta(timedelta):
+    result = []
+    units = {'hour': int(timedelta.total_seconds() // 3600),
+             'minute': int(timedelta.total_seconds() % 3600) // 60,
+             'second': int(timedelta.total_seconds() % 60)}
+    if units['hour'] >= 1:
+        del units['second']
+    keys = ['hour', 'minute', 'second']
+    for unit in keys:
+        num = units[unit]
+        if num:
+            result.append('{} {}{}'.format(num, unit, 's' if num != 1 else ''))
+    return ', '.join(result)
 
 # Below are the command line interface functions, using the `click` library.
 # See `click`'s documentation for details on how this works. Currently mostly
@@ -489,17 +503,20 @@ def start(context):
     if start is None:
         print('Not started')
     else:
-        print('Started at', project.start_time.time())
+        print('Started at', start.time())
 
 @cli.command()
 @click.pass_context
 def stop(context):
     project = context.obj['project']
+    start = project.start_time
     end = project.stop()
     if end is None:
         print('Not stopped')
     else:
         print('Stopped at', end.time())
+        difference = end - start
+        print(humanize_timedelta(difference))
 
 if __name__ == "__main__":
     obj = {'project': Project('config.json')}

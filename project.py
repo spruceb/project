@@ -20,6 +20,7 @@ WIP
 """
 import atexit
 import csv
+import datetime
 import itertools as it
 import json
 import operator
@@ -146,16 +147,17 @@ class DatePoint:
 
     def time(self):
         return self._first_date.time()
+    
     @property
     def total_time(self):
-        """The time in seconds this represents
+        """The timedelta this represents
 
         If it's not a range, it's considered to represent an hour. This
         information being stored here is probably a bad idea and should
         be decoupled."""
         if self.is_range:
-            return (self._second_date - self._first_date).total_seconds()
-        return 3600
+            return self._second_date - self._first_date
+        return datetime.timedelta(hours=1)
 
     def __eq__(self, other):
         if self._is_range != other._is_range:
@@ -331,8 +333,9 @@ class Project:
         self.config = ConfigManager(config_path)
         self.cache = CacheManager(self.config.cache_path)
         self.data = DataManager(self.config.data_path)
-        self.finished_threshold = 3600
+        self.finished_threshold = datetime.timedelta(hours=1)
         self.timeframe = timeframe
+        self._last_range = (None, None)
 
     def finish(self):
         """Record this day as finished >= one hour of personal project work"""
@@ -349,9 +352,12 @@ class Project:
     def _day_groups(self):
         return list(binary_groupby(self.data.date_list, lambda x, y: x.same(y)))
 
+    def _dates_total_time(self, date_list):
+        return sum((date.total_time for date in date_list), datetime.timedelta())
+    
     def _data_is_finished(self, date_list):
         """Check if the time of the DatePoints exceeds completion threshold"""
-        return sum(date.total_time for date in date_list) >= self.finished_threshold
+        return self._dates_total_time(date_list) >= self.finished_threshold
 
     @property
     def _finished_streaks(self):
@@ -381,6 +387,16 @@ class Project:
         return 0
 
     @property
+    def total_time_today(self):
+        today = DatePoint.now()
+        last_day = self._day_groups[-1]
+        if today.same(last_day[0]):
+            result = self._dates_total_time(last_day)
+        else:
+            result = datetime.timedelta()
+        return result + self.range_time
+        
+    @property
     def start_time(self):
         """Get the start time for the current timeframe"""
         return self.cache.start_time
@@ -389,7 +405,7 @@ class Project:
     def start_time(self, value):
         """Set the start time for a new timeframe"""
         self.cache.start_time = value
-
+    
     def start(self, overwrite=False):
         """Start a new timeframe"""
         now = DatePoint.now()
@@ -398,15 +414,24 @@ class Project:
             self.start_time = now
             return now
 
-
     def stop(self):
         """End the current timeframe"""
         now = DatePoint.now()
         if self.start_time is not None and now.same(self.start_time):
             self.data.add_date(DatePoint(self.start_time, now))
+            self._last_range = self.start_time, now
             self.start_time = None
             return now
 
+    @property
+    def range_time(self):
+        if self.start_time is not None:
+            return DatePoint.now() - self.start_time
+        elif None not in self._last_range:
+            return self._last_range[1] - self._last_range[0]
+        else:
+            return datetime.timedelta()
+        
     def close(self):
         """Persist data that may have changed during runtime"""
         self.config._save_data()
@@ -444,9 +469,10 @@ def humanize_timedelta(timedelta):
     units = {'hour': int(timedelta.total_seconds() // 3600),
              'minute': int(timedelta.total_seconds() % 3600) // 60,
              'second': int(timedelta.total_seconds() % 60)}
+    keys = ['hour', 'minute', 'second']
     if units['hour'] >= 1:
         del units['second']
-    keys = ['hour', 'minute', 'second']
+        del keys[-1]
     for unit in keys:
         num = units[unit]
         if num:
@@ -479,6 +505,8 @@ def streak(context):
     project = context.obj['project']
     print(project.streak)
     print_streak_string(project._finished_streaks)
+    total = project.total_time_today
+    print("Today: {}".format(humanize_timedelta(total)))
 
 @cli.command()
 @click.pass_context

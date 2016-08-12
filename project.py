@@ -53,8 +53,8 @@ class DatePoint:
 
         Possibilities: strings, Arrow dates, datetimes, DatePoint objects
         """
-        if (isinstance(first_date, type(self)) and
-                isinstance(second_date, type(self))):
+        if (isinstance(first_date, DatePoint) and
+                isinstance(second_date, DatePoint)):
             first_date = first_date._first_date
             second_date = second_date._first_date
         self._is_range = second_date is not None
@@ -141,12 +141,14 @@ class DatePoint:
         """If this DatePoint's timeframe is before the others"""
         return self.ordinal(timeframe) < other.ordinal(timeframe)
 
+    @property
     def date(self):
         """The 'date' version of this DatePoint, i.e. without time info"""
         return DatePoint(arrow.get(self._first_date.date()))
 
+    @property
     def time(self):
-        return self._first_date.time()
+        return self._first_date.time
     
     @property
     def total_time(self):
@@ -335,7 +337,7 @@ class Project:
         self.data = DataManager(self.config.data_path)
         self.finished_threshold = datetime.timedelta(hours=1)
         self.timeframe = timeframe
-        self._last_range = (None, None)
+        self._last_range = None
 
     def finish(self):
         """Record this day as finished >= one hour of personal project work"""
@@ -387,11 +389,20 @@ class Project:
         return 0
 
     @property
+    def range_time(self):
+        if self.start_time is not None:
+            return DatePoint.now() - self.start_time
+        elif self._last_range is not None:
+            return self._last_range.total_time
+        else:
+            return datetime.timedelta()
+        
+    @property
     def total_time_today(self):
         today = DatePoint.now()
         last_day = self._day_groups[-1]
-        if today.same(last_day[0]):
-            result = self._dates_total_time(last_day)
+        if today.same(last_day):
+            result = last_day.total_time
         else:
             result = datetime.timedelta()
         return result + self.range_time
@@ -418,19 +429,11 @@ class Project:
         """End the current timeframe"""
         now = DatePoint.now()
         if self.start_time is not None and now.same(self.start_time):
-            self.data.add_date(DatePoint(self.start_time, now))
-            self._last_range = self.start_time, now
+            last_range = DatePoint(self.start_time, now)
+            self.data.add_date(last_range)
+            self._last_range = last_range
             self.start_time = None
             return now
-
-    @property
-    def range_time(self):
-        if self.start_time is not None:
-            return DatePoint.now() - self.start_time
-        elif None not in self._last_range:
-            return self._last_range[1] - self._last_range[0]
-        else:
-            return datetime.timedelta()
         
     def close(self):
         """Persist data that may have changed during runtime"""
@@ -458,8 +461,8 @@ def print_streak_string(day_streak_lists):
         # total_string += ' '
         last_end = streak[-1]
     today = DatePoint.now()
-    if today.date() > last_end:
-        time_difference = (today.date() - last_end).days
+    if today.date > last_end:
+        time_difference = (today.date - last_end).days
         total_string += unfinished(time_difference - 1)
         total_string += '◻'
     print(total_string)
@@ -497,7 +500,7 @@ def finish(context):
     if finish is None:
         print('Already finished today')
     else:
-        print('Finished', finish.date())
+        print('Finished', finish.date)
 
 @cli.command()
 @click.pass_context
@@ -531,7 +534,7 @@ def start(context):
     if start is None:
         print('Not started')
     else:
-        print('Started at', start.time())
+        print('Started at', start.time)
 
 @cli.command()
 @click.pass_context
@@ -542,7 +545,7 @@ def stop(context):
     if end is None:
         print('Not stopped')
     else:
-        print('Stopped at', end.time())
+        print('Stopped at', end.time)
         difference = end - start
         print(humanize_timedelta(difference))
 

@@ -181,6 +181,29 @@ class DatePoint:
     def __repr__(self):
         return str(self)
 
+class DayGroup(DatePoint):
+    def __init__(self, date_list):
+        assert(len(date_list) > 0)        
+        self.date_list = date_list
+        self.day = date_list[0].date
+
+    @classmethod
+    def group_days(cls, datepoint_list):
+        return [cls(dates) for dates in
+                binary_groupby(datepoint_list, lambda x, y: x.same(y))]
+        
+    @property
+    def total_time(self):
+        return sum((date.total_time for date in self.date_list),
+                   datetime.timedelta())
+
+    def ordinal(self, timeframe=None, use_start=None):
+        return self.day.ordinal(timeframe=Timeframe.day)
+
+    @property
+    def _first_date(self):
+        return self.day._first_date
+            
 def binary_groupby(iterator, key):
     """Return the iterator split based on a boolean 'streak' function"""
     iterator = iter(iterator)
@@ -352,20 +375,17 @@ class Project:
 
     @property
     def _day_groups(self):
-        return list(binary_groupby(self.data.date_list, lambda x, y: x.same(y)))
-
-    def _dates_total_time(self, date_list):
-        return sum((date.total_time for date in date_list), datetime.timedelta())
+        return DayGroup.group_days(self.data.date_list)
     
-    def _data_is_finished(self, date_list):
+    def _is_finished(self, day_group):
         """Check if the time of the DatePoints exceeds completion threshold"""
-        return self._dates_total_time(date_list) >= self.finished_threshold
+        return day_group.total_time >= self.finished_threshold
 
     @property
     def _finished_streaks(self):
         """Get list of streaks of DatePoints for consecutive finished days"""
-        date_points = (group[0].date() for group in self._day_groups
-                       if self._data_is_finished(group))
+        date_points = (group for group in self._day_groups
+                       if self._is_finished(group))
         return list(binary_groupby(date_points, lambda x, y: x.within_streak(y)))
 
     @property

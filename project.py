@@ -54,13 +54,19 @@ class DatePoint:
 
         Possibilities: strings, Arrow dates, datetimes, DatePoint objects
         """
-        if (isinstance(first_date, DatePoint) and
-                isinstance(second_date, DatePoint)):
-            first_date = first_date._first_date
-            second_date = second_date._first_date
         self._is_range = second_date is not None
-        self._first_date = arrow.get(first_date)
-        self._second_date = arrow.get(second_date)
+        if isinstance(first_date, DatePoint):
+            self._first_date = first_date._first_date
+            if first_date.is_range:
+                self._is_range = True
+                self._second_date = first_date._second_date
+        else:
+            self._first_date = arrow.get(first_date)
+
+        if isinstance(second_date, DatePoint):
+            self._second_date = second_date._first_date
+        elif second_date is not None:
+            self._second_date = arrow.get(second_date)
 
     @property
     def is_range(self):
@@ -146,15 +152,19 @@ class DatePoint:
     def date(self):
         """The 'date' version of this DatePoint, i.e. without time info"""
         return DatePoint(arrow.get(self._first_date.date()))
-    
+
     @property
     def datetime_date(self):
         return self._first_date.date()
-        
+
     @property
     def time(self):
         return self._first_date.time()
-    
+
+    @property
+    def arrow(self):
+        return self._first_date
+
     @property
     def total_time(self):
         """The timedelta this represents
@@ -165,6 +175,9 @@ class DatePoint:
         if self.is_range:
             return self._second_date - self._first_date
         return datetime.timedelta(hours=1)
+
+    def included(self, date_list, timeframe=Timeframe.day):
+        return any(self.same(date, timeframe) for date in date_list)
 
     def __eq__(self, other):
         if self._is_range != other._is_range:
@@ -206,9 +219,13 @@ class DayGroup(DatePoint):
         return self.day.ordinal(timeframe=Timeframe.day)
 
     @property
+    def is_range(self):
+        return False
+
+    @property
     def _first_date(self):
         return self.day._first_date
-            
+
 def binary_groupby(iterator, key):
     """Return the iterator split based on a boolean 'streak' function"""
     iterator = iter(iterator)
@@ -381,13 +398,13 @@ class Project:
     @property
     def day_groups(self):
         return DayGroup.group_days(self.data.date_list)
-    
+
     def _is_finished(self, day_group):
         """Check if the time of the DatePoints exceeds completion threshold"""
         return day_group.total_time >= self.finished_threshold
 
     @property
-    def _finished_streaks(self):
+    def finished_streaks(self):
         """Get list of streaks of DatePoints for consecutive finished days"""
         date_points = (group for group in self.day_groups
                        if self._is_finished(group))
@@ -404,7 +421,7 @@ class Project:
         day.
         """
         today = DatePoint.now()
-        streaks = self._finished_streaks
+        streaks = self.finished_streaks
         if not streaks or not any(streaks):
             return 0
         last_streak = streaks[-1]
@@ -414,7 +431,7 @@ class Project:
         return 0
 
     @property
-    def range_time(self):
+    def current_range_time(self):
         if self.start_time is not None:
             return DatePoint.now() - self.start_time
         elif self._last_range is not None:
@@ -468,6 +485,8 @@ class Project:
         self.config._save_data()
         self.cache._save_data()
 
+# Below are "cli interface" helper functions
+
 def color_string(string, color):
     """Get a terminal-escaped string for a certain color"""
     return '\033[{}m{}\033[0m'.format(color, string)
@@ -496,6 +515,8 @@ def print_streak_string(day_streak_lists):
     print(total_string)
 
 def humanize_timedelta(timedelta):
+    if timedelta.total_seconds() == 0:
+        return 'nothing'
     result = []
     units = {'hour': int(timedelta.total_seconds() // 3600),
              'minute': int(timedelta.total_seconds() % 3600) // 60,

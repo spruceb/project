@@ -19,6 +19,7 @@ is also useful, and so is supported as well.
 WIP
 """
 import atexit
+import bisect
 import csv
 import datetime
 import itertools as it
@@ -145,10 +146,14 @@ class DatePoint:
     def date(self):
         """The 'date' version of this DatePoint, i.e. without time info"""
         return DatePoint(arrow.get(self._first_date.date()))
-
+    
+    @property
+    def datetime_date(self):
+        return self._first_date.date()
+        
     @property
     def time(self):
-        return self._first_date.time
+        return self._first_date.time()
     
     @property
     def total_time(self):
@@ -533,6 +538,28 @@ def streak(context):
     print_streak_string(project._finished_streaks)
     total = project.total_time_today
     print('Today: {}'.format(humanize_timedelta(total)))
+
+@cli.command()
+@click.option('--start', default=None)
+@click.option('--end', default=None)
+@click.pass_context
+def times(context, start, end):
+    project = context.obj['project']
+    days = project.day_groups
+    if end is None:
+        end = DatePoint.now()
+    else:
+        end = DatePoint(arrow.get(end))
+    if start is None:
+        start = days[0]
+    else:
+        start = DatePoint(arrow.get(end))
+    start_index = bisect.bisect_left(days, start)
+    end_index = bisect.bisect(days, end)
+    selected_days = days[start_index:end_index]
+    for day in selected_days:
+        print('{}: {}'.format(day.datetime_date,
+                              humanize_timedelta(day.total_time)))    
 
 @cli.command()
 @click.pass_context

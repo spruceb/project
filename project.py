@@ -366,7 +366,7 @@ class Project:
         """Record this day as finished >= one hour of personal project work"""
         today = DatePoint.now()
         last_date = self.data.date_list[-1]
-        last_day_finished = self._data_is_finished(self._day_groups[-1])
+        last_day_finished = self._data_is_finished(self.day_groups[-1])
         if (today.after(last_date) or
             today.same(last_date) and not last_day_finished):
             self.data.add_date(today)
@@ -374,7 +374,7 @@ class Project:
             return today
 
     @property
-    def _day_groups(self):
+    def day_groups(self):
         return DayGroup.group_days(self.data.date_list)
     
     def _is_finished(self, day_group):
@@ -384,7 +384,7 @@ class Project:
     @property
     def _finished_streaks(self):
         """Get list of streaks of DatePoints for consecutive finished days"""
-        date_points = (group for group in self._day_groups
+        date_points = (group for group in self.day_groups
                        if self._is_finished(group))
         return list(binary_groupby(date_points, lambda x, y: x.within_streak(y)))
 
@@ -420,7 +420,7 @@ class Project:
     @property
     def total_time_today(self):
         today = DatePoint.now()
-        last_day = self._day_groups[-1]
+        last_day = self.day_groups[-1]
         if today.same(last_day):
             result = last_day.total_time
         else:
@@ -448,12 +448,15 @@ class Project:
     def stop(self):
         """End the current timeframe"""
         now = DatePoint.now()
-        if self.start_time is not None and now.same(self.start_time):
-            last_range = DatePoint(self.start_time, now)
-            self.data.add_date(last_range)
-            self._last_range = last_range
-            self.start_time = None
-            return now
+        if self.start_time is not None:
+            if now.same(self.start_time):
+                last_range = DatePoint(self.start_time, now)
+                self.data.add_date(last_range)
+                self._last_range = last_range
+                self.start_time = None
+                return now
+            else:
+                pass
         
     def close(self):
         """Persist data that may have changed during runtime"""
@@ -481,7 +484,7 @@ def print_streak_string(day_streak_lists):
         # total_string += ' '
         last_end = streak[-1]
     today = DatePoint.now()
-    if today.date > last_end:
+    if today.after(last_end):
         time_difference = (today.date - last_end).days
         total_string += unfinished(time_difference - 1)
         total_string += '◻'
@@ -526,10 +529,10 @@ def finish(context):
 @click.pass_context
 def streak(context):
     project = context.obj['project']
-    print(project.streak)
+    print('Current streak: {}'.format(project.streak))
     print_streak_string(project._finished_streaks)
     total = project.total_time_today
-    print("Today: {}".format(humanize_timedelta(total)))
+    print('Today: {}'.format(humanize_timedelta(total)))
 
 @cli.command()
 @click.pass_context
@@ -552,7 +555,7 @@ def start(context):
     project = context.obj['project']
     start = project.start()
     if start is None:
-        print('Not started')
+        print('Already started')
     else:
         print('Started at', start.time)
 

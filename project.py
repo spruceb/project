@@ -201,7 +201,7 @@ class DatePoint:
 
 class DayGroup(DatePoint):
     def __init__(self, date_list):
-        assert(len(date_list) > 0)        
+        assert(len(date_list) > 0)
         self.date_list = date_list
         self.day = date_list[0].date
 
@@ -209,7 +209,7 @@ class DayGroup(DatePoint):
     def group_days(cls, datepoint_list):
         return [cls(dates) for dates in
                 binary_groupby(datepoint_list, lambda x, y: x.same(y))]
-        
+
     @property
     def total_time(self):
         return sum((date.total_time for date in self.date_list),
@@ -438,17 +438,24 @@ class Project:
             return self._last_range.total_time
         else:
             return datetime.timedelta()
-        
+
+    def total_time_on(self, date):
+        datepoint = DatePoint(date)
+        matches = (day for day in self.day_groups if day.same(datepoint))
+        try:
+            match = next(matches)
+        except StopIteration:
+            match = None
+        if match is None:
+            return datetime.timedelta()
+        return match.total_time
+
     @property
     def total_time_today(self):
         today = DatePoint.now()
-        last_day = self.day_groups[-1]
-        if today.same(last_day):
-            result = last_day.total_time
-        else:
-            result = datetime.timedelta()
-        return result + self.range_time
-        
+        result = self.total_time_on(today)
+        return result + self.current_range_time
+
     @property
     def start_time(self):
         """Get the start time for the current timeframe"""
@@ -458,7 +465,7 @@ class Project:
     def start_time(self, value):
         """Set the start time for a new timeframe"""
         self.cache.start_time = value
-    
+
     def start(self, overwrite=False):
         """Start a new timeframe"""
         now = DatePoint.now()
@@ -479,7 +486,55 @@ class Project:
                 return now
             else:
                 pass
-        
+
+    def fill_boundries(func):
+        def wrapped(*args, **kwargs):
+            if kwargs.get('start') is None:
+                kwargs['start'] = args[0].day_groups[0].day
+            if kwargs.get('end') is None:
+                kwargs['end'] = DatePoint.now()
+            return func(*args, **kwargs)
+        return wrapped
+
+    @fill_boundries
+    def day_range(self, start=None, end=None):
+        days = self.day_groups
+        start_index = bisect.bisect_left(days, start)
+        end_index = bisect.bisect(days, end)
+        return days[start_index:end_index]
+
+    @fill_boundries
+    def filled_range(self, start=None, end=None):
+        return list(arrow.Arrow.range(
+            Timeframe.day, start.arrow, end.arrow))
+
+    @fill_boundries
+    def streaks_range(self, start=None, end=None, strict=False):
+        # strict means to start with streak that occurs entirely after start
+        # and end with streak entirely before end
+        # otherwise uses first streak containing start and same for end
+        streaks = self.finished_streaks
+        def startf(streak):
+            if strict:
+                return all(start.before(d) for d in streak)
+            return any(start.same(d) for d in streak)
+        def endf(streak):
+            if strict:
+                return all(end.after(d) for d in streak)
+            return any(end.same(d) for d in streak)
+        try:
+            start_streak = next(filter(lambda x: startf(x[1]),
+                                       list(enumerate(streaks))))
+            end_streak = next(filter(lambda x: endf(x[1]),
+                                     list(enumerate(streaks))))
+            return streaks[start_streak[0]:end_streak[0] + 1]
+        except StopIteration:
+            return []
+
+    def total_in_range(self, date_list):
+        return sum((self.total_time_on(date) for date in date_list),
+                   datetime.timedelta())
+
     def close(self):
         """Persist data that may have changed during runtime"""
         self.config._save_data()
@@ -552,35 +607,60 @@ def finish(context):
         print('Finished', finish.date)
 
 @cli.command()
+@click.option('--list', 'list_', is_flag=True, default=False)
 @click.pass_context
-def streak(context):
+def streak(context, list_):
     project = context.obj['project']
+    if list_:
+        list_streaks(project)
+        return
     print('Current streak: {}'.format(project.streak))
-    print_streak_string(project._finished_streaks)
+    print_streak_string(project.finished_streaks)
     total = project.total_time_today
     print('Today: {}'.format(humanize_timedelta(total)))
 
+def list_streaks(project):
+    streaks = project.finished_streaks
+    for i, streak in enumerate(streaks):
+        start = streak[0].datetime_date
+        end = streak[-1].datetime_date
+        if start != end:
+            streak_string = '{} to {}'.format(start, end)
+        else:
+            streak_string = '{}'.format(start)
+        time_string = humanize_timedelta(project.total_in_range(streak))
+        print('{}: {}, {}'.format(i + 1, streak_string, time_string))
+
 @cli.command()
-@click.option('--start', default=None)
-@click.option('--end', default=None)
+@click.option('--start', '-s', default=None)
+@click.option('--end', '-e', default=None)
+@click.option('--streak', 'print_format', is_flag=True, flag_value='streak',
+              default=True)
+@click.option('--combined', 'print_format', is_flag=True, flag_value='combined')
+@click.option('--empty', 'print_format', is_flag=True, flag_value='empty')
 @click.pass_context
-def times(context, start, end):
+def times(context, start, end, print_format):
     project = context.obj['project']
-    days = project.day_groups
-    if end is None:
-        end = DatePoint.now()
-    else:
-        end = DatePoint(arrow.get(end))
-    if start is None:
-        start = days[0]
-    else:
-        start = DatePoint(arrow.get(end))
-    start_index = bisect.bisect_left(days, start)
-    end_index = bisect.bisect(days, end)
-    selected_days = days[start_index:end_index]
-    for day in selected_days:
+    print()
+    if print_format == 'streak':
+        streak_range = project.streaks_range(start=start, end=end)
+        print('-' * 40)
+        for streak in streak_range:
+            print_days(streak)
+            print('-' * 40)
+    elif print_format == 'empty':
+        for day in project.filled_range(start=start, end=end):
+            print('{}: {}'.format(day.date(),
+                                  humanize_timedelta(
+                                      project.total_time_on(day))))
+    elif print_format == 'combined':
+        print_days(project.day_range(start=start, end=end))
+    print()
+
+def print_days(days):
+    for day in days:
         print('{}: {}'.format(day.datetime_date,
-                              humanize_timedelta(day.total_time)))    
+                              humanize_timedelta(day.total_time)))
 
 @cli.command()
 @click.pass_context

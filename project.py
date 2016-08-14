@@ -420,15 +420,21 @@ class Project:
         only timeranges that total 40min, it will not be counted as a completed
         day.
         """
+        if self.current_streak is None:
+            return 0
+        return len(self.current_streak)
+
+    @property
+    def current_streak(self):
         today = DatePoint.now()
         streaks = self.finished_streaks
         if not streaks or not any(streaks):
-            return 0
+            return None
         last_streak = streaks[-1]
         last_entry = last_streak[-1]
         if today.within_streak(last_entry):
-            return len(streaks[-1])
-        return 0
+            return last_streak
+        return None
 
     @property
     def current_range_time(self):
@@ -438,6 +444,12 @@ class Project:
             return self._last_range.total_time
         else:
             return datetime.timedelta()
+
+    @property
+    def current_streak_time(self):
+        if self.current_streak is None:
+            return datetime.timedelta()
+        return self.total_time_in(self.current_streak)
 
     def total_time_on(self, date):
         datepoint = DatePoint(date)
@@ -531,9 +543,13 @@ class Project:
         except StopIteration:
             return []
 
-    def total_in_range(self, date_list):
+    def total_time_in(self, date_list):
         return sum((self.total_time_on(date) for date in date_list),
                    datetime.timedelta())
+
+    @classmethod
+    def setup(cls):
+        pass
 
     def close(self):
         """Persist data that may have changed during runtime"""
@@ -606,20 +622,29 @@ def finish(context):
     else:
         print('Finished', finish.date)
 
-@cli.command()
+@cli.group(invoke_without_command=True)
 @click.option('--list', 'list_', is_flag=True, default=False)
 @click.pass_context
 def streak(context, list_):
     project = context.obj['project']
-    if list_:
-        list_streaks(project)
-        return
-    print('Current streak: {}'.format(project.streak))
-    print_streak_string(project.finished_streaks)
-    total = project.total_time_today
-    print('Today: {}'.format(humanize_timedelta(total)))
+    if context.invoked_subcommand is None:
+        print('Current streak: {}'.format(project.streak))
+        print_streak_string(project.finished_streaks)
+        streak_total = project.current_streak_time
+        today_total = project.total_time_today
+        print('Total: {}'.format(humanize_timedelta(streak_total)))
+        print('Today: {}'.format(humanize_timedelta(today_total)))
 
-def list_streaks(project):
+@streak.command()
+@click.pass_context
+def total(context):
+    project = context.obj['project']
+    print(humanize_timedelta(project.current_streak_time))
+
+@streak.command('list')
+@click.pass_context
+def list_streaks(context):
+    project = context.obj['project']
     streaks = project.finished_streaks
     for i, streak in enumerate(streaks):
         start = streak[0].datetime_date
@@ -628,7 +653,7 @@ def list_streaks(project):
             streak_string = '{} to {}'.format(start, end)
         else:
             streak_string = '{}'.format(start)
-        time_string = humanize_timedelta(project.total_in_range(streak))
+        time_string = humanize_timedelta(project.total_time_in(streak))
         print('{}: {}, {}'.format(i + 1, streak_string, time_string))
 
 @cli.command()

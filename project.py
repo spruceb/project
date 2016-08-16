@@ -27,10 +27,14 @@ import json
 import operator
 import os
 import os.path
+import sys
+from shutil import rmtree
 from functools import reduce
 
 import arrow
 import click
+
+
 
 class Timeframe:
     """Enum for possible units of time"""
@@ -252,20 +256,26 @@ class DataManager:
     storing this data is abstracted from the rest of the program. Here it is
     a simple `csv` file, with 'frozen' DatePoints stored in it.
     """
-    def __init__(self, filepath):
-        """Create a new manager for the given `filepath`
-
-        Ensures the file exists/creates it if it doesn't
-        """
-        self.filepath = filepath
-        if not os.path.exists(filepath):
-            open(filepath, 'w').close()
+    def __init__(self, config, path, data_file):
+        self.data_filepath = os.path.join(path, data_file)
+        self.config = config
         self._date_list = None
-        self._file_modified = False
+        self._file_modified = True
+
+    @classmethod
+    def default(cls):
+        return {'data_file': 'data.csv'}
+
+    @classmethod
+    def setup(cls, overwrite, path, data_file, **kwargs):
+        data_filepath = os.path.join(path, data_file)
+        if overwrite or not os.path.isfile(data_filepath):
+            with open(data_filepath, 'w') as f:
+                pass
 
     def add_date(self, date):
         """Append a new DatePoint to the date list"""
-        with open(self.filepath, 'a', newline='') as writef:
+        with open(self.data_filepath, 'a', newline='') as writef:
             writer = csv.writer(writef)
             writer.writerow([date.freeze()])
         self._file_modified = True
@@ -274,44 +284,14 @@ class DataManager:
     def date_list(self):
         """Get the list of DatePoints this manager stores"""
         if self._date_list is None or self._file_modified:
-            with open(self.filepath, 'r', newline='') as reader:
+            with open(self.data_filepath, 'r', newline='') as reader:
                 reader = csv.reader(reader)
                 self._date_list = [DatePoint.unfreeze(date[0]) for date in reader]
             self._file_modified = False
         return self._date_list
 
-class ConfigManager:
-    """Manager for the configuration of this project
-
-    Abstraction for a persistent configuration. Saves the filepaths of the
-    other necessary files as well. Currently the 'bootstrap' point, i.e. a path
-    to this file is necessary to find or create the rest of the data. This will
-    later be used to store more user-specific config as functionality is
-    expanded.
-    """
-    def __init__(self, filepath):
-        """Initialize a new manager from a `json` file, or make a new file"""
-        self.filepath = filepath
-        if not os.path.exists(filepath):
-            with open(filepath, 'w') as config:
-                json.dump({}, config)
-        with open(filepath, 'r+') as f:
-            self._data = json.load(f)
-
-    @property
-    def cache_path(self):
-        """Return the filepath for the cache file"""
-        return self._data['cache_path']
-
-    @property
-    def data_path(self):
-        """Return the filepath for the data file"""
-        return self._data['data_path']
-
-    def _save_data(self):
-        """Persist data that may have changed during runtime"""
-        with open(self.filepath, 'w') as f:
-            json.dump(self._data, f)
+    def save_data(self):
+        pass
 
 class CacheManager:
     """Manager for cached data, i.e. calculated attributes of the data
@@ -322,31 +302,34 @@ class CacheManager:
     TODO: give this a reference to `DataManager` and have it do calculations
     itself.
     """
-    def __init__(self, filepath):
+    def __init__(self, config, cache_filename, path):
         """Create a new cache manager of the filepath, or create a new file"""
-        self.filepath = filepath
-        if not os.path.exists(filepath):
-            with open(filepath, 'w') as cache:
-                json.dump({'last_date': None}, cache)
-        with open(filepath, 'r+') as f:
-            self._data = json.load(f)
+        self.config = config
+        self.cache_path = os.path.join(path, cache_filename)
+        self._cache = None
 
     @property
-    def last_date(self):
-        """Get the last date in the date list"""
-        return DatePoint.unfreeze(self._data['last_date'])
+    def cache(self):
+        if self._cache is None:
+            with open(self.cache_path, 'r') as f:
+                self._cache = json.load(f)
+        return self._cache
 
-    @last_date.setter
-    def last_date(self, value):
-        """Set what the last date is"""
-        if value is not None:
-            value = value.freeze()
-        self._data['last_date'] = value
+    @classmethod
+    def default(cls):
+        return {'cache_filename': 'cache.json'}
+
+    @classmethod
+    def setup(cls, path, overwrite, cache_filename, **kwargs):
+        cache_filepath = os.path.join(path, cache_filename)
+        if overwrite or not os.path.isfile(cache_filepath):
+            with open(cache_filepath, 'w') as f:
+                json.dump({'last_date': None, 'start_time': None}, f)
 
     @property
     def start_time(self):
         """Get the start time of the current timerange (if it exists)"""
-        start_time = self._data.get('start_time')
+        start_time = self.cache.get('start_time')
         if start_time is not None:
             return DatePoint.unfreeze(start_time)
 
@@ -355,13 +338,150 @@ class CacheManager:
         """Set the start time for a new timerange"""
         if value is not None:
             value = value.freeze()
-        self._data['start_time'] = value
+        self.cache['start_time'] = value
 
-    def _save_data(self):
+    def save_data(self):
         """Persist data that may have changed during runtime"""
-        with open(self.filepath, 'w') as f:
-            json.dump(self._data, f)
+        if self._cache is not None:
+            with open(self.cache_path, 'w') as f:
+                json.dump(self._cache, f)
 
+class ConfigLocations:
+    config = 'config'
+    local = 'local'
+    env = 'env'
+
+class ConfigManager:
+    """Manager for the configuration of this project
+
+    Abstraction for a persistent configuration. Saves the filepaths of the
+    other necessary files as well. Currently the 'bootstrap' point, i.e. a path
+    to this file is necessary to find or create the rest of the data. This will
+    later be used to store more user-specific config as functionality is
+    expanded.
+    """
+
+    LOCAL_DIRNAME = '.project'
+    ENVIRONMENT_OVERRIDE = 'PROJECT_TRACKER_HOME'
+    GLOBAL_DIRNAME = 'project'
+    DEFAULT_GLOBAL_LOCATION = os.path.join(os.environ['HOME'], '.config')
+    GLOBAL_DIRPATH = os.path.join(DEFAULT_GLOBAL_LOCATION, GLOBAL_DIRNAME)
+    CACHE_DIRNAME = 'cache'
+    DATA_DIRNAME = 'data'
+    CONFIG_FILENAME = 'project.config'
+
+    def __init__(self):
+        self.config_path = self._config_location()
+        self.config_filepath = os.path.join(self.config_path,
+                                            self.CONFIG_FILENAME)
+        try:
+            with open(self.config_filepath, 'r') as f:
+                config_string = f.read()
+                self._backup = config_string
+                self._config = json.loads(config_string)
+        except json.decoder.JSONDecodeError:
+            raise ValueError('Invalid data')
+        self.data = DataManager(self, **self.config['data'])
+        self.cache = CacheManager(self, **self.config['cache'])
+
+    @property
+    def config(self):
+        return self._config
+
+    @classmethod
+    def _config_location(cls):
+        override = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
+        if os.path.isdir(cls.LOCAL_DIRNAME):
+            result = os.path.expanduser(cls.LOCAL_DIRNAME)
+        elif override is not None and os.path.isdir(override):
+            result = os.path.expanduser(override)
+        elif os.path.isdir(cls.GLOBAL_DIRPATH):
+            result = os.path.expanduser(cls.GLOBAL_DIRPATH)
+        else:
+            raise FileNotFoundError('Config not found')
+        return os.path.abspath(result)
+
+    @classmethod
+    def validate(cls, config_location):
+        if not os.path.isdir(config_location):
+            return False
+        config_path = os.path.join(config_location, cls.CONFIG_FILENAME)
+        if not os.path.isfile(config_path):
+            return False
+        cache_dir = os.path.join(config_location, cls.CACHE_DIRNAME)
+        if not os.path.isdir(cache_dir):
+            return False
+        if not CacheManager.validate(cache_dir):
+            return False
+        data_path = os.path.join(config_location, cls.DATA_DIRNAME)
+        if not os.path.isdir(cache_dir):
+            return False
+        if not DataManager.validate(data_path):
+            return False
+
+    @classmethod
+    def create_config_location(cls, config_location_type,
+                               make_intermediate=True, env_path=None):
+        makedir = os.makedirs if make_intermediate else os.mkdir
+        if config_location_type == ConfigLocations.local:
+            makedir(cls.LOCAL_DIRNAME)
+        elif config_location_type == ConfigLocations.env:
+            if env_path is not None:
+                makedir(env_path)
+            else:
+                raise ValueError('Must give env_path for env config type')
+        elif config_location_type == ConfigLocations.config:
+            makedir(cls.GLOBAL_DIRPATH)
+
+    @classmethod
+    def setup(cls, config_location_type=ConfigLocations.config,
+              overwrite=True, env_path=None):
+        # if overwrite is false should check if things exist first
+        try:
+            config_location = cls._config_location()
+        except FileNotFoundError:
+            cls.create_config_location(config_location_type, env_path)
+            config_location = cls._config_location()
+        config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
+        if not overwrite and os.path.isfile(config_filepath):
+            with open(config_filepath, 'r') as f:
+                config = json.load(f)
+                data_init = config['data']
+                cache_init = config['cache']
+        else:
+            with open(config_filepath, 'w') as f:
+                config = {}
+                data_init = DataManager.default()
+                cache_init = CacheManager.default()
+                data_path = os.path.join(config_location, cls.DATA_DIRNAME)
+                cache_path = os.path.join(config_location, cls.CACHE_DIRNAME)
+                if os.path.isdir(cache_path) and overwrite:
+                        rmtree(cache_path)
+                if not os.path.isdir(cache_path):
+                    os.mkdir(cache_path)
+                if os.path.isdir(data_path) and overwrite:
+                        rmtree(data_path)
+                if not os.path.isdir(data_path):
+                    os.mkdir(data_path)
+                cache_init['path'] = cache_path
+                data_init['path'] = data_path
+                config['data'] = data_init
+                config['cache'] = cache_init
+                json.dump(config, f)
+        DataManager.setup(overwrite=overwrite, **data_init)
+        CacheManager.setup(overwrite=overwrite, **cache_init)
+
+    def save_data(self):
+        """Persist data that may have changed during runtime"""
+        if self._config is not None:
+            with open(self.config_filepath, 'r') as f:
+                contents = f.read()
+            if contents != self._backup:
+                pass # do nothing for now, be safer later
+            with open(self.config_filepath, 'w') as f:
+                json.dump(self._config, f)
+        self.data.save_data()
+        self.cache.save_data()
 
 class Project:
     """Provides the programmatic interface of the function
@@ -370,29 +490,28 @@ class Project:
     it's the 'API' of the application, the high level set of supported
     operations
     """
-    def __init__(self, config_path, timeframe=Timeframe.day):
-        """Create a `Project` given a config filepath
-
-        Currently coupled to the managers in that it passes filenames to them.
-        They should be decoupled later, perhaps by just being passed a
-        `ConfigManager` that creates the others.
-        """
-        self.config = ConfigManager(config_path)
-        self.cache = CacheManager(self.config.cache_path)
-        self.data = DataManager(self.config.data_path)
+    def __init__(self, config, timeframe=Timeframe.day):
+        """Create a `Project`"""
+        self.config = config
+        self.cache = self.config.cache
+        self.data = self.config.data
         self.finished_threshold = datetime.timedelta(hours=1)
         self.timeframe = timeframe
         self._last_range = None
+        atexit.register(self.close)
 
     def finish(self):
         """Record this day as finished >= one hour of personal project work"""
         today = DatePoint.now()
-        last_date = self.data.date_list[-1]
-        last_day_finished = self._data_is_finished(self.day_groups[-1])
-        if (today.after(last_date) or
-            today.same(last_date) and not last_day_finished):
+        if self.data.date_list:
+            last_date = self.data.date_list[-1]
+            last_day_finished = self._data_is_finished(self.day_groups[-1])
+            if (today.after(last_date) or
+                    today.same(last_date) and not last_day_finished):
+                self.data.add_date(today)
+                return today
+        else:
             self.data.add_date(today)
-            self.cache.last_date = today
             return today
 
     @property
@@ -547,14 +666,9 @@ class Project:
         return sum((self.total_time_on(date) for date in date_list),
                    datetime.timedelta())
 
-    @classmethod
-    def setup(cls):
-        pass
-
     def close(self):
         """Persist data that may have changed during runtime"""
-        self.config._save_data()
-        self.cache._save_data()
+        self.config.save_data()
 
 # Below are "cli interface" helper functions
 
@@ -607,10 +721,44 @@ def humanize_timedelta(timedelta):
 # mirrors the functions in `Project`.
 # TODO: move to a separate CLI interface module or class
 
+def setup_noncommand():
+    print('Where do you want the config to be stored?')
+    result = input('g, l, e, or h for help: ')
+    while result not in 'gle':
+        if result == 'h':
+            print("g: global config, i.e. make a new directory in your ~/.config.\n"
+                  "l: local config, make a .project directory in the current dir\n"
+                  "e: environment variable, set {} to a custom directory".format(
+                      ConfigManager.ENVIRONMENT_OVERRIDE))
+            result = input('g, l, e, or h for help: ')
+        else:
+            result = input('Invalid input. g, l, e, or h for help: ')
+    if result == 'e':
+        filepath = os.path.expanduser(input('Filepath: '))
+    else:
+        filepath = None
+    result = {'g': ConfigLocations.config,
+              'l': ConfigLocations.local,
+              'e': ConfigLocations.env}[result]
+    overwrite = input('Overwrite existing data? (y/n) ')
+    while overwrite not in 'yn':
+        overwrite = input('Invalid input. Overwrite existing data? (y/n) ')
+    overwrite = overwrite == 'y'
+    ConfigManager.setup(result, overwrite, filepath)
+    return ConfigManager()
+
 @click.group()
 @click.pass_context
 def cli(context, debug_time_period=None):
-    pass
+    try:
+        config = ConfigManager()
+    except (FileNotFoundError, ValueError):
+        print("Please run setup")
+        if context.invoked_subcommand != 'setup':
+            context.abort()
+        config = None
+    project = Project(config) if config is not None else None
+    context.obj['project'] = project
 
 @cli.command()
 @click.pass_context
@@ -621,6 +769,12 @@ def finish(context):
         print('Already finished today')
     else:
         print('Finished', finish.date)
+
+@cli.command()
+@click.pass_context
+def setup(context):
+    config = setup_noncommand()
+    context.obj['project'] = Project(config)
 
 @cli.group(invoke_without_command=True)
 @click.option('--list', 'list_', is_flag=True, default=False)
@@ -726,7 +880,5 @@ def stop(context):
         print(humanize_timedelta(difference))
 
 if __name__ == "__main__":
-    obj = {'project': Project('config.json')}
-    atexit.register(obj['project'].close)
+    obj = {}
     cli(obj=obj)
-    obj['project'].close()

@@ -22,14 +22,10 @@ import atexit
 import bisect
 import csv
 import datetime
-import itertools as it
 import json
-import operator
 import os
 import os.path
-import sys
 from shutil import rmtree
-from functools import reduce
 
 import arrow
 import click
@@ -159,14 +155,17 @@ class DatePoint:
 
     @property
     def datetime_date(self):
+        """The `datetime.date` of this DatePoint"""
         return self._first_date.date()
 
     @property
     def time(self):
+        """The `datetime.time` of this DatePoint"""
         return self._first_date.time()
 
     @property
     def arrow(self):
+        """The `arrow.Arrow` version of this DatePoint"""
         return self._first_date
 
     @property
@@ -181,53 +180,84 @@ class DatePoint:
         return datetime.timedelta(hours=1)
 
     def included(self, date_list, timeframe=Timeframe.day):
+        """Return whether the timeframe of this date is included in the list"""
         return any(self.same(date, timeframe) for date in date_list)
 
     def __eq__(self, other):
+        """Compare to other, equal if dates compare equal"""
         if self._is_range != other._is_range:
             return False
         return (self._first_date == other._first_date and
                 self._second_date == other._second_date)
 
     def __sub__(self, other):
+        """Get the difference between two dates as a `timedelta`"""
         return self._first_date - other._first_date
 
     def __gt__(self, other):
+        """Check whether this date comes after another (no timeframe)"""
         return self._first_date > other._first_date
 
     def __str__(self):
+        """Get this DatePoint formatted as a string"""
         if self.is_range:
             return '{} to {}'.format(self._first_date, self._second_date)
         return str(self._first_date)
 
     def __repr__(self):
-        return str(self)
+        """Get a representation of this DatePoint"""
+        return self.freeze()
 
 class DayGroup(DatePoint):
+    """A group of DatePoints in a single day
+
+    A DayGroup inherits from DatePoint and in most ways can be treated
+    like one. It differs in that it stores a list of DatePoints rather than
+    one or two `arrow.Arrow` dates. It uses the `date` (i.e. the day) of the
+    first component date for all DatePoint operations that require a
+    `_first_date`.
+
+    Used in various places in `Project` when the individual DatePoints in a day
+    aren't as relevant as the aggregate day information.
+    """
     def __init__(self, date_list):
-        assert(len(date_list) > 0)
+        """Create a new DayGroup from a list of dates in the same day"""
+        assert len(date_list) > 0
         self.date_list = date_list
         self.day = date_list[0].date
 
     @classmethod
     def group_days(cls, datepoint_list):
+        """Group a list of DatePoints by the day they occurred on
+
+        This will return a list of lists. Each of those lists could be
+        validly used to construct a DayGroup.
+        """
         return [cls(dates) for dates in
                 binary_groupby(datepoint_list, lambda x, y: x.same(y))]
 
     @property
     def total_time(self):
+        """Get the total time from all component DatePoints"""
         return sum((date.total_time for date in self.date_list),
                    datetime.timedelta())
 
     def ordinal(self, timeframe=None, use_start=None):
+        """Gets the 'prototypical' day's ordinal value
+
+        This will not work/compare correctly with DatePoint methods using
+        different timeframes. This entire class is currently tied to days.
+        """
         return self.day.ordinal(timeframe=Timeframe.day)
 
     @property
     def is_range(self):
+        """DayGroups are not ranges for the purpose of DatePoint methods"""
         return False
 
     @property
     def _first_date(self):
+        """Return prototypical day for DatePoint compatibility"""
         return self.day._first_date
 
 def binary_groupby(iterator, key):
@@ -264,10 +294,15 @@ class DataManager:
 
     @classmethod
     def default(cls):
+        """Return the default init arguments to be passed in by Config"""
         return {'data_file': 'data.csv'}
 
     @classmethod
     def setup(cls, overwrite, path, data_file, **kwargs):
+        """Perform the necessary initial setup for the data
+
+        Currently just makes the data file (a csv)
+        """
         data_filepath = os.path.join(path, data_file)
         if overwrite or not os.path.isfile(data_filepath):
             with open(data_filepath, 'w') as f:
@@ -291,25 +326,28 @@ class DataManager:
         return self._date_list
 
     def save_data(self):
+        """Persist any data that may have changed during runtime
+
+        Since `add_data` is the only mutating method and it persists the data,
+        this doesn't need to do anything (as of yet).
+        """
         pass
 
 class CacheManager:
-    """Manager for cached data, i.e. calculated attributes of the data
+    """Manager for cached data, i.e. calculated/temporary data
 
     Not used extensively in `Project`, however will become more relevant as
     more extensive statistics/information is made available.
-
-    TODO: give this a reference to `DataManager` and have it do calculations
-    itself.
     """
     def __init__(self, config, cache_filename, path):
-        """Create a new cache manager of the filepath, or create a new file"""
+        """Create a new cache manager from the filepath"""
         self.config = config
         self.cache_path = os.path.join(path, cache_filename)
         self._cache = None
 
     @property
     def cache(self):
+        """Lazy loading of the cache data"""
         if self._cache is None:
             with open(self.cache_path, 'r') as f:
                 self._cache = json.load(f)
@@ -317,14 +355,19 @@ class CacheManager:
 
     @classmethod
     def default(cls):
+        """Return the default init arguments to be passed in by Config"""
         return {'cache_filename': 'cache.json'}
 
     @classmethod
     def setup(cls, path, overwrite, cache_filename, **kwargs):
+        """Perform the necessary initial setup for the data
+
+        Makes the cache file and initializes the used values to None
+        """
         cache_filepath = os.path.join(path, cache_filename)
         if overwrite or not os.path.isfile(cache_filepath):
             with open(cache_filepath, 'w') as f:
-                json.dump({'last_date': None, 'start_time': None}, f)
+                json.dump({'start_time': None}, f)
 
     @property
     def start_time(self):
@@ -341,15 +384,16 @@ class CacheManager:
         self.cache['start_time'] = value
 
     def save_data(self):
-        """Persist data that may have changed during runtime"""
+        """Persist any data that may have changed during runtime"""
         if self._cache is not None:
             with open(self.cache_path, 'w') as f:
                 json.dump(self._cache, f)
 
 class ConfigLocations:
-    config = 'config'
-    local = 'local'
-    env = 'env'
+    """Enum for the different types of places config can be stored"""
+    config = 'config' # global config, i.e. in ~/.config
+    local = 'local' # local to a specific directory, so /some/path/.project
+    env = 'env' # a specific global location given by an environment variable
 
 class ConfigManager:
     """Manager for the configuration of this project
@@ -361,16 +405,32 @@ class ConfigManager:
     expanded.
     """
 
+    # directory name to use when making a config dir inside the current dir
     LOCAL_DIRNAME = '.project'
+    # environment variable to check for a user-specified config location
     ENVIRONMENT_OVERRIDE = 'PROJECT_TRACKER_HOME'
+    # directory name for a "global" config in a single location
     GLOBAL_DIRNAME = 'project'
-    DEFAULT_GLOBAL_LOCATION = os.path.join(os.environ['HOME'], '.config')
+    # config directory to put the global config into (currently ~/.config)
+    DEFAULT_GLOBAL_LOCATION = os.path.expanduser('~/.config')
+    # full path for a global config folder
     GLOBAL_DIRPATH = os.path.join(DEFAULT_GLOBAL_LOCATION, GLOBAL_DIRNAME)
+    # directory to keep the cache in
     CACHE_DIRNAME = 'cache'
+    # directory to keep the data in
     DATA_DIRNAME = 'data'
+    # filename for the actual config file
     CONFIG_FILENAME = 'project.config'
 
     def __init__(self):
+        """Create a new config manager, checking all the default locations
+
+        This uses the `_config_location` class method to try to find an
+        existing config location. If no such location exists, or if the data
+        there is unreadable, raises an error. Otherwise also initializes the
+        data and cache with the init data they store into config (on setup
+        or during normal running).
+        """
         self.config_path = self._config_location()
         self.config_filepath = os.path.join(self.config_path,
                                             self.CONFIG_FILENAME)
@@ -386,10 +446,16 @@ class ConfigManager:
 
     @property
     def config(self):
+        """Get the config dict stored in the config file"""
         return self._config
 
     @classmethod
     def _config_location(cls):
+        """Check and return possible config locations in preference order
+
+        Tries to look at local, then environment-variable set, then default
+        global config locations. If none are found raises an error.
+        """
         override = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
         if os.path.isdir(cls.LOCAL_DIRNAME):
             result = os.path.expanduser(cls.LOCAL_DIRNAME)
@@ -403,6 +469,11 @@ class ConfigManager:
 
     @classmethod
     def validate(cls, config_location):
+        """Check that a config location was correctly set up
+
+        Not currently in use, needs slightly more thought and implementations
+        in Cache and Data.
+        """
         if not os.path.isdir(config_location):
             return False
         config_path = os.path.join(config_location, cls.CONFIG_FILENAME)
@@ -422,6 +493,7 @@ class ConfigManager:
     @classmethod
     def create_config_location(cls, config_location_type,
                                make_intermediate=True, env_path=None):
+        """Make the directory required for certain config locations"""
         makedir = os.makedirs if make_intermediate else os.mkdir
         if config_location_type == ConfigLocations.local:
             makedir(cls.LOCAL_DIRNAME)
@@ -436,7 +508,21 @@ class ConfigManager:
     @classmethod
     def setup(cls, config_location_type=ConfigLocations.config,
               overwrite=True, env_path=None):
-        # if overwrite is false should check if things exist first
+        """Set up the file structures required to run from scratch
+
+        Can be given a type of config location to set up, and a flag
+        for whether to overwrite existing data. Not overwriting may cause
+        some issues, as proper validation is not yet done so this could leave
+        incomplete structures untouched.
+
+        This ensures a 'config location' based on the argument exists. Then
+        inside it it creates a file structure consisting of a config file,
+        a cache folder, and a data folder. Data and Cache setups are called
+        on their respective folders. The default initialization arguments for
+        Data and Cache are stored in the config file. These arguments are meant
+        to potentially be modified by Data and Cache as needed and effectively
+        act as a "data store" for them.
+        """
         try:
             config_location = cls._config_location()
         except FileNotFoundError:
@@ -472,7 +558,12 @@ class ConfigManager:
         CacheManager.setup(overwrite=overwrite, **cache_init)
 
     def save_data(self):
-        """Persist data that may have changed during runtime"""
+        """Persist data that may have changed during runtime
+
+        Hooks are in place here for rudimentary 'backups', i.e. figuring
+        out what to do if the data in the file has been modified since the
+        class was initialized from it. However this is not currently in use.
+        """
         if self._config is not None:
             with open(self.config_filepath, 'r') as f:
                 contents = f.read()
@@ -505,7 +596,7 @@ class Project:
         today = DatePoint.now()
         if self.data.date_list:
             last_date = self.data.date_list[-1]
-            last_day_finished = self._data_is_finished(self.day_groups[-1])
+            last_day_finished = self._is_finished(self.day_groups[-1])
             if (today.after(last_date) or
                     today.same(last_date) and not last_day_finished):
                 self.data.add_date(today)
@@ -516,6 +607,7 @@ class Project:
 
     @property
     def day_groups(self):
+        """Return the DatePoints grouped into DayGroups"""
         return DayGroup.group_days(self.data.date_list)
 
     def _is_finished(self, day_group):
@@ -524,7 +616,7 @@ class Project:
 
     @property
     def finished_streaks(self):
-        """Get list of streaks of DatePoints for consecutive finished days"""
+        """Get list of streaks of DayGroups for consecutive finished days"""
         date_points = (group for group in self.day_groups
                        if self._is_finished(group))
         return list(binary_groupby(date_points, lambda x, y: x.within_streak(y)))
@@ -545,6 +637,11 @@ class Project:
 
     @property
     def current_streak(self):
+        """Get the current streak if there is one
+
+        If either today or yesterday `_is_finished`, return the streak
+        that contains it. Otherwise there is no current streak.
+        """
         today = DatePoint.now()
         streaks = self.finished_streaks
         if not streaks or not any(streaks):
@@ -557,6 +654,7 @@ class Project:
 
     @property
     def current_range_time(self):
+        """Return the timedelta for the current/most recent 'started' time"""
         if self.start_time is not None:
             return DatePoint.now() - self.start_time
         elif self._last_range is not None:
@@ -566,11 +664,13 @@ class Project:
 
     @property
     def current_streak_time(self):
+        """Get the total time in the current streak"""
         if self.current_streak is None:
             return datetime.timedelta()
         return self.total_time_in(self.current_streak)
 
     def total_time_on(self, date):
+        """Get the total time on a given date"""
         datepoint = DatePoint(date)
         matches = (day for day in self.day_groups if day.same(datepoint))
         try:
@@ -583,6 +683,7 @@ class Project:
 
     @property
     def total_time_today(self):
+        """Get the total time spent on the current day"""
         today = DatePoint.now()
         result = self.total_time_on(today)
         return result + self.current_range_time
@@ -619,6 +720,11 @@ class Project:
                 pass
 
     def fill_boundries(func):
+        """Decorator that defaults a start to the first day and end to now
+
+        Used for several methods that have start and end as keyword arguments
+        that default to None, and all have the same desired default behavior.
+        """
         def wrapped(*args, **kwargs):
             if kwargs.get('start') is None:
                 kwargs['start'] = args[0].day_groups[0].day
@@ -629,6 +735,10 @@ class Project:
 
     @fill_boundries
     def day_range(self, start=None, end=None):
+        """Get the range of days with data between start and end
+
+        Defaults as in fill_boundries
+        """
         days = self.day_groups
         start_index = bisect.bisect_left(days, start)
         end_index = bisect.bisect(days, end)
@@ -636,14 +746,18 @@ class Project:
 
     @fill_boundries
     def filled_range(self, start=None, end=None):
+        """Get the range of days between start and end"""
         return list(arrow.Arrow.range(
             Timeframe.day, start.arrow, end.arrow))
 
     @fill_boundries
     def streaks_range(self, start=None, end=None, strict=False):
-        # strict means to start with streak that occurs entirely after start
-        # and end with streak entirely before end
-        # otherwise uses first streak containing start and same for end
+        """Get the range of streaks between start and endf
+
+        The strict flag specifies whether the range is meant to include
+        streaks that contain start and end, or only streaks strictly
+        after start and before end.
+        """
         streaks = self.finished_streaks
         def startf(streak):
             if strict:
@@ -654,15 +768,19 @@ class Project:
                 return all(end.after(d) for d in streak)
             return any(end.same(d) for d in streak)
         try:
-            start_streak = next(filter(lambda x: startf(x[1]),
-                                       list(enumerate(streaks))))
-            end_streak = next(filter(lambda x: endf(x[1]),
-                                     list(enumerate(streaks))))
-            return streaks[start_streak[0]:end_streak[0] + 1]
+            start_streak = next(i for i, x in enumerate(streaks) if startf(x))
+
+            end_streak = next(i for i, x in enumerate(streaks) if endf(x))
+            return streaks[start_streak:end_streak + 1]
         except StopIteration:
             return []
 
     def total_time_in(self, date_list):
+        """Get the total time in a list of dates
+
+        Checks the data rather than any total time that may be reported by
+        these data objects, and so will work with non-DatePoints.
+        """
         return sum((self.total_time_on(date) for date in date_list),
                    datetime.timedelta())
 
@@ -700,6 +818,7 @@ def print_streak_string(day_streak_lists):
     print(total_string)
 
 def humanize_timedelta(timedelta):
+    """Print out nice-reading strings for time periods"""
     if timedelta.total_seconds() == 0:
         return 'nothing'
     result = []
@@ -722,6 +841,7 @@ def humanize_timedelta(timedelta):
 # TODO: move to a separate CLI interface module or class
 
 def setup_noncommand():
+    """Interactive setup for project config"""
     print('Where do you want the config to be stored?')
     result = input('g, l, e, or h for help: ')
     while result not in 'gle':

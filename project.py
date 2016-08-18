@@ -183,6 +183,14 @@ class DatePoint:
         """Return whether the timeframe of this date is included in the list"""
         return any(self.same(date, timeframe) for date in date_list)
 
+    def split_range(self, timeframe=Timeframe.day):
+        """Split a range that extends over multiple timefames"""
+        assert(self.is_range)
+        first = DatePoint(self._first_date, self._first_date.ceil(timeframe))
+        second = DatePoint(self._second_date.floor(timeframe),
+                           self._second_date)
+        return (first, second)
+
     def __eq__(self, other):
         """Compare to other, equal if dates compare equal"""
         if self._is_range != other._is_range:
@@ -657,8 +665,6 @@ class Project:
         """Return the timedelta for the current/most recent 'started' time"""
         if self.start_time is not None:
             return DatePoint.now() - self.start_time
-        elif self._last_range is not None:
-            return self._last_range.total_time
         else:
             return datetime.timedelta()
 
@@ -710,14 +716,19 @@ class Project:
         """End the current timeframe"""
         now = DatePoint.now()
         if self.start_time is not None:
+            this_range = DatePoint(self.start_time, now)
             if now.same(self.start_time):
-                last_range = DatePoint(self.start_time, now)
-                self.data.add_date(last_range)
-                self._last_range = last_range
-                self.start_time = None
-                return now
+                self.data.add_date(this_range)
+                self._last_range = this_range
             else:
-                pass
+                first, second = this_range.split_range()
+                self.data.add_date(first)
+                self.data.add_date(second)
+                self._last_range = second
+            self.start_time = None
+            return now
+
+
 
     def fill_boundries(func):
         """Decorator that defaults a start to the first day and end to now

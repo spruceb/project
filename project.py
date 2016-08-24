@@ -31,7 +31,6 @@ import arrow
 import click
 
 
-
 class Timeframe:
     """Enum for possible units of time"""
     year = 'year'
@@ -185,7 +184,7 @@ class DatePoint:
 
     def split_range(self, timeframe=Timeframe.day):
         """Split a range that extends over multiple timefames"""
-        assert(self.is_range)
+        assert self.is_range
         first = DatePoint(self._first_date, self._first_date.ceil(timeframe))
         second = DatePoint(self._second_date.floor(timeframe),
                            self._second_date)
@@ -215,6 +214,7 @@ class DatePoint:
     def __repr__(self):
         """Get a representation of this DatePoint"""
         return self.freeze()
+
 
 class DayGroup(DatePoint):
     """A group of DatePoints in a single day
@@ -268,6 +268,7 @@ class DayGroup(DatePoint):
         """Return prototypical day for DatePoint compatibility"""
         return self.day._first_date
 
+
 def binary_groupby(iterator, key):
     """Return the iterator split based on a boolean 'streak' function"""
     iterator = iter(iterator)
@@ -283,8 +284,8 @@ def binary_groupby(iterator, key):
         last_item = item
     if result_list:
         yield result_list
-
 # TODO: below classes can clearly be abstracted down the line
+
 
 class DataManager:
     """Wraps the mechanism for persisting and querying work dates and times
@@ -313,7 +314,7 @@ class DataManager:
         """
         data_filepath = os.path.join(path, data_file)
         if overwrite or not os.path.isfile(data_filepath):
-            with open(data_filepath, 'w') as f:
+            with open(data_filepath, 'w'):
                 pass
 
     def add_date(self, date):
@@ -357,8 +358,8 @@ class CacheManager:
     def cache(self):
         """Lazy loading of the cache data"""
         if self._cache is None:
-            with open(self.cache_path, 'r') as f:
-                self._cache = json.load(f)
+            with open(self.cache_path, 'r') as cache_file:
+                self._cache = json.load(cache_file)
         return self._cache
 
     @classmethod
@@ -374,8 +375,8 @@ class CacheManager:
         """
         cache_filepath = os.path.join(path, cache_filename)
         if overwrite or not os.path.isfile(cache_filepath):
-            with open(cache_filepath, 'w') as f:
-                json.dump({'start_time': None}, f)
+            with open(cache_filepath, 'w') as cache_file:
+                json.dump({'start_time': None}, cache_file)
 
     @property
     def start_time(self):
@@ -394,14 +395,16 @@ class CacheManager:
     def save_data(self):
         """Persist any data that may have changed during runtime"""
         if self._cache is not None:
-            with open(self.cache_path, 'w') as f:
-                json.dump(self._cache, f)
+            with open(self.cache_path, 'w') as cache_file:
+                json.dump(self._cache, cache_file)
+
 
 class ConfigLocations:
     """Enum for the different types of places config can be stored"""
     config = 'config' # global config, i.e. in ~/.config
     local = 'local' # local to a specific directory, so /some/path/.project
     env = 'env' # a specific global location given by an environment variable
+
 
 class ConfigManager:
     """Manager for the configuration of this project
@@ -443,8 +446,8 @@ class ConfigManager:
         self.config_filepath = os.path.join(self.config_path,
                                             self.CONFIG_FILENAME)
         try:
-            with open(self.config_filepath, 'r') as f:
-                config_string = f.read()
+            with open(self.config_filepath, 'r') as config_file:
+                config_string = config_file.read()
                 self._backup = config_string
                 self._config = json.loads(config_string)
         except json.decoder.JSONDecodeError:
@@ -538,30 +541,30 @@ class ConfigManager:
             config_location = cls._config_location()
         config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
         if not overwrite and os.path.isfile(config_filepath):
-            with open(config_filepath, 'r') as f:
-                config = json.load(f)
+            with open(config_filepath, 'r') as config_file:
+                config = json.load(config_file)
                 data_init = config['data']
                 cache_init = config['cache']
         else:
-            with open(config_filepath, 'w') as f:
-                config = {}
-                data_init = DataManager.default()
-                cache_init = CacheManager.default()
-                data_path = os.path.join(config_location, cls.DATA_DIRNAME)
-                cache_path = os.path.join(config_location, cls.CACHE_DIRNAME)
-                if os.path.isdir(cache_path) and overwrite:
-                        rmtree(cache_path)
-                if not os.path.isdir(cache_path):
-                    os.mkdir(cache_path)
-                if os.path.isdir(data_path) and overwrite:
-                        rmtree(data_path)
-                if not os.path.isdir(data_path):
-                    os.mkdir(data_path)
-                cache_init['path'] = cache_path
-                data_init['path'] = data_path
-                config['data'] = data_init
-                config['cache'] = cache_init
-                json.dump(config, f)
+            config = {}
+            data_init = DataManager.default()
+            cache_init = CacheManager.default()
+            data_path = os.path.join(config_location, cls.DATA_DIRNAME)
+            cache_path = os.path.join(config_location, cls.CACHE_DIRNAME)
+            if os.path.isdir(cache_path) and overwrite:
+                rmtree(cache_path)
+            if not os.path.isdir(cache_path):
+                os.mkdir(cache_path)
+            if os.path.isdir(data_path) and overwrite:
+                rmtree(data_path)
+            if not os.path.isdir(data_path):
+                os.mkdir(data_path)
+            cache_init['path'] = cache_path
+            data_init['path'] = data_path
+            config['data'] = data_init
+            config['cache'] = cache_init
+            with open(config_filepath, 'w') as config_file:
+                json.dump(config, config_file)
         DataManager.setup(overwrite=overwrite, **data_init)
         CacheManager.setup(overwrite=overwrite, **cache_init)
 
@@ -573,14 +576,15 @@ class ConfigManager:
         class was initialized from it. However this is not currently in use.
         """
         if self._config is not None:
-            with open(self.config_filepath, 'r') as f:
-                contents = f.read()
+            with open(self.config_filepath, 'r') as config_file:
+                contents = config_file.read()
             if contents != self._backup:
                 pass # do nothing for now, be safer later
-            with open(self.config_filepath, 'w') as f:
-                json.dump(self._config, f)
+            with open(self.config_filepath, 'w') as config_file:
+                json.dump(self._config, config_file)
         self.data.save_data()
         self.cache.save_data()
+
 
 class Project:
     """Provides the programmatic interface of the function
@@ -707,8 +711,8 @@ class Project:
     def start(self, overwrite=False):
         """Start a new timeframe"""
         now = DatePoint.now()
-        if (self.start_time is None or not now.same(self.start_time)
-                or overwrite):
+        if (self.start_time is None or
+                not now.same(self.start_time) or overwrite):
             self.start_time = now
             return now
 
@@ -727,8 +731,6 @@ class Project:
                 self._last_range = second
             self.start_time = None
             return now
-
-
 
     def fill_boundries(func):
         """Decorator that defaults a start to the first day and end to now
@@ -770,18 +772,20 @@ class Project:
         after start and before end.
         """
         streaks = self.finished_streaks
+
         def startf(streak):
             if strict:
                 return all(start.before(d) for d in streak)
-            return any(start.same(d) for d in streak)
+            return any(start.before(d) or start.same(d) for d in streak)
+
         def endf(streak):
             if strict:
                 return all(end.after(d) for d in streak)
-            return any(end.same(d) for d in streak)
+            return any(end.after(d) or end.same(d) for d in streak)
+
         try:
             start_streak = next(i for i, x in enumerate(streaks) if startf(x))
-
-            end_streak = next(i for i, x in enumerate(streaks) if endf(x))
+            end_streak = [i for i, x in enumerate(streaks) if endf(x)][-1]
             return streaks[start_streak:end_streak + 1]
         except StopIteration:
             return []
@@ -805,12 +809,15 @@ def color_string(string, color):
     """Get a terminal-escaped string for a certain color"""
     return '\033[{}m{}\033[0m'.format(color, string)
 
+
 def print_streak_string(day_streak_lists):
     """Print the streaks with red and green squares representing day states"""
     total_string = ''
     last_end = None
+
     def finished(n):
         return color_string('◼' * n, '0;32')
+
     def unfinished(n):
         return color_string('◻' * n, '31;1')
 
@@ -827,6 +834,7 @@ def print_streak_string(day_streak_lists):
         total_string += unfinished(time_difference - 1)
         total_string += '◻'
     print(total_string)
+
 
 def humanize_timedelta(timedelta):
     """Print out nice-reading strings for time periods"""
@@ -851,16 +859,19 @@ def humanize_timedelta(timedelta):
 # mirrors the functions in `Project`.
 # TODO: move to a separate CLI interface module or class
 
+
 def setup_noncommand():
     """Interactive setup for project config"""
     print('Where do you want the config to be stored?')
     result = input('g, l, e, or h for help: ')
     while result not in 'gle':
         if result == 'h':
-            print("g: global config, i.e. make a new directory in your ~/.config.\n"
-                  "l: local config, make a .project directory in the current dir\n"
-                  "e: environment variable, set {} to a custom directory".format(
-                      ConfigManager.ENVIRONMENT_OVERRIDE))
+            print('g: global config, i.e. make a new directory in your '
+                  '~/.config.\n'
+                  'l: local config, make a .project directory in the '
+                  'current dir\n'
+                  'e: environment variable, set {} to a custom '
+                  'directory'.format(ConfigManager.ENVIRONMENT_OVERRIDE))
             result = input('g, l, e, or h for help: ')
         else:
             result = input('Invalid input. g, l, e, or h for help: ')
@@ -878,6 +889,7 @@ def setup_noncommand():
     ConfigManager.setup(result, overwrite, filepath)
     return ConfigManager()
 
+
 @click.group()
 @click.pass_context
 def cli(context, debug_time_period=None):
@@ -891,6 +903,7 @@ def cli(context, debug_time_period=None):
     project = Project(config) if config is not None else None
     context.obj['project'] = project
 
+
 @cli.command()
 @click.pass_context
 def finish(context):
@@ -901,11 +914,13 @@ def finish(context):
     else:
         print('Finished', finish.date)
 
+
 @cli.command()
 @click.pass_context
 def setup(context):
     config = setup_noncommand()
     context.obj['project'] = Project(config)
+
 
 @cli.group(invoke_without_command=True)
 @click.option('--list', 'list_', is_flag=True, default=False)
@@ -920,11 +935,13 @@ def streak(context, list_):
         print('Total: {}'.format(humanize_timedelta(streak_total)))
         print('Today: {}'.format(humanize_timedelta(today_total)))
 
+
 @streak.command()
 @click.pass_context
 def total(context):
     project = context.obj['project']
     print(humanize_timedelta(project.current_streak_time))
+
 
 @streak.command('list')
 @click.pass_context
@@ -940,6 +957,7 @@ def list_streaks(context):
             streak_string = '{}'.format(start)
         time_string = humanize_timedelta(project.total_time_in(streak))
         print('{}: {}, {}'.format(i + 1, streak_string, time_string))
+
 
 @cli.command()
 @click.option('--start', '-s', default=None)
@@ -967,10 +985,12 @@ def times(context, start, end, print_format):
         print_days(project.day_range(start=start, end=end))
     print()
 
+
 def print_days(days):
     for day in days:
         print('{}: {}'.format(day.datetime_date,
                               humanize_timedelta(day.total_time)))
+
 
 @cli.command()
 @click.pass_context
@@ -980,12 +1000,14 @@ def debug(context):
     The only non-`Project` CLI command
     """
     project = context.obj['project']
-    import pdb; pdb.set_trace()
+    import ipdb; ipdb.set_trace()
+
 
 @cli.command()
 @click.pass_context
 def config(context):
     pass
+
 
 @cli.command()
 @click.pass_context
@@ -996,6 +1018,7 @@ def start(context):
         print('Already started')
     else:
         print('Started at', start.time)
+
 
 @cli.command()
 @click.pass_context

@@ -790,6 +790,16 @@ class Project:
         except StopIteration:
             return []
 
+    @fill_boundries
+    def streaks_boolean(self, start=None, end=None):
+        """Return a boolean for whether each day in the range was finished"""
+        result = [self.total_time_on(day) >= self.finished_threshold
+                  for day in self.filled_range(start=start, end=end)]
+        # end is today and today is not finished
+        if DatePoint.now().same(end) and not result[-1]:
+            # today could still be finished
+            result[-1] = None
+
     def total_time_in(self, date_list):
         """Get the total time in a list of dates
 
@@ -809,32 +819,25 @@ def color_string(string, color):
     """Get a terminal-escaped string for a certain color"""
     return '\033[{}m{}\033[0m'.format(color, string)
 
+def finished_square(n=1):
+    return click.style('◼' * n, fg='green')
 
-def print_streak_string(day_streak_lists):
+def unfinished_square(n=1):
+    return click.style('◻' * n, fg='red')
+
+def unknown_square(n=1):
+    return click.style('◻' * n, fg='white')
+
+def print_streak_string(day_streak_booleans):
     """Print the streaks with red and green squares representing day states"""
-    total_string = ''
-    last_end = None
-
-    def finished(n):
-        return color_string('◼' * n, '0;32')
-
-    def unfinished(n):
-        return color_string('◻' * n, '31;1')
-
-    for streak in day_streak_lists:
-        if last_end is not None:
-            time_difference = (streak[0] - last_end).days
-            total_string += unfinished(time_difference)
-        total_string += finished(len(streak))
-        # total_string += ' '
-        last_end = streak[-1]
-    today = DatePoint.now()
-    if today.after(last_end):
-        time_difference = (today.date - last_end).days
-        total_string += unfinished(time_difference - 1)
-        total_string += '◻'
-    print(total_string)
-
+    for item in day_streak_booleans:
+        if item is None:
+            click.echo(unknown_square(), nl=False)
+        elif item:
+            click.echo(finished_square(), nl=False)
+        else:
+            click.echo(unfinished_square(), nl=False)
+    click.echo()
 
 def humanize_timedelta(timedelta):
     """Print out nice-reading strings for time periods"""
@@ -859,22 +862,39 @@ def humanize_timedelta(timedelta):
 # mirrors the functions in `Project`.
 # TODO: move to a separate CLI interface module or class
 
+def char_input(prompt, last_invalid=False):
+    if last_invalid:
+        prompt = 'Invalid input. {}'.format(prompt)
+    click.echo(prompt, nl=False)
+    result = click.getchar()
+    click.echo()
+    return result
+
+def validated_char_input(prompt, valid_chars, invalid_callback=None):
+    result = char_input(prompt)
+    while result not in valid_chars:
+        last_invalid = True
+        if invalid_callback is not None:
+            last_invalid = invalid_callback(result)
+        result = char_input(prompt, last_invalid)
+    return result
 
 def setup_noncommand():
     """Interactive setup for project config"""
-    print('Where do you want the config to be stored?')
-    result = input('g, l, e, or h for help: ')
-    while result not in 'gle':
-        if result == 'h':
-            print('g: global config, i.e. make a new directory in your '
-                  '~/.config.\n'
-                  'l: local config, make a .project directory in the '
-                  'current dir\n'
-                  'e: environment variable, set {} to a custom '
-                  'directory'.format(ConfigManager.ENVIRONMENT_OVERRIDE))
-            result = input('g, l, e, or h for help: ')
-        else:
-            result = input('Invalid input. g, l, e, or h for help: ')
+    click.echo('Where do you want the config to be stored?')
+
+    def help_(char):
+        if char == 'h':
+            click.echo(
+                'g: global config, i.e. make a new directory in your '
+                '~/.config.\n'
+                'l: local config, make a .project directory in the '
+                'current dir\n'
+                'e: environment variable, set {} to a custom '
+                'directory'.format(ConfigManager.ENVIRONMENT_OVERRIDE))
+            return False
+
+    result = validated_char_input('g, l, e, or h for help: ', 'gle', help_)
     if result == 'e':
         filepath = os.path.expanduser(input('Filepath: '))
     else:
@@ -882,9 +902,7 @@ def setup_noncommand():
     result = {'g': ConfigLocations.config,
               'l': ConfigLocations.local,
               'e': ConfigLocations.env}[result]
-    overwrite = input('Overwrite existing data? (y/n) ')
-    while overwrite not in 'yn':
-        overwrite = input('Invalid input. Overwrite existing data? (y/n) ')
+    overwrite = validated_char_input('Overwrite existing data? (y/n) ', 'yn')
     overwrite = overwrite == 'y'
     ConfigManager.setup(result, overwrite, filepath)
     return ConfigManager()
@@ -896,7 +914,7 @@ def cli(context, debug_time_period=None):
     try:
         config = ConfigManager()
     except (FileNotFoundError, ValueError):
-        print("Please run setup")
+        click.echo('Please run setup', err=True)
         if context.invoked_subcommand != 'setup':
             context.abort()
         config = None
@@ -910,9 +928,9 @@ def finish(context):
     project = context.obj['project']
     finish = project.finish()
     if finish is None:
-        print('Already finished today')
+        click.echo('Already finished today')
     else:
-        print('Finished', finish.date)
+        click.echo('Finished', finish.date)
 
 
 @cli.command()
@@ -928,19 +946,19 @@ def setup(context):
 def streak(context, list_):
     project = context.obj['project']
     if context.invoked_subcommand is None:
-        print('Current streak: {}'.format(project.streak))
-        print_streak_string(project.finished_streaks)
+        click.echo('Current streak: {}'.format(project.streak))
+        print_streak_string(project.streaks_boolean)
         streak_total = project.current_streak_time
         today_total = project.total_time_today
-        print('Total: {}'.format(humanize_timedelta(streak_total)))
-        print('Today: {}'.format(humanize_timedelta(today_total)))
+        click.echo('Total: {}'.format(humanize_timedelta(streak_total)))
+        click.echo('Today: {}'.format(humanize_timedelta(today_total)))
 
 
 @streak.command()
 @click.pass_context
 def total(context):
     project = context.obj['project']
-    print(humanize_timedelta(project.current_streak_time))
+    click.echo(humanize_timedelta(project.current_streak_time))
 
 
 @streak.command('list')
@@ -956,7 +974,7 @@ def list_streaks(context):
         else:
             streak_string = '{}'.format(start)
         time_string = humanize_timedelta(project.total_time_in(streak))
-        print('{}: {}, {}'.format(i + 1, streak_string, time_string))
+        click.echo('{}: {}, {}'.format(i + 1, streak_string, time_string))
 
 
 @cli.command()
@@ -969,27 +987,26 @@ def list_streaks(context):
 @click.pass_context
 def times(context, start, end, print_format):
     project = context.obj['project']
-    print()
+    results = []
     if print_format == 'streak':
         streak_range = project.streaks_range(start=start, end=end)
-        print('-' * 40)
+        results.append('-' * 40)
         for streak in streak_range:
-            print_days(streak)
-            print('-' * 40)
+            for day in streak:
+                day_string = '{}: {}'.format(
+                    day.datetime_date, humanize_timedelta(day.total_time))
+                results.append(day_string)
+            results.append('-' * 40)
     elif print_format == 'empty':
         for day in project.filled_range(start=start, end=end):
-            print('{}: {}'.format(day.date(),
-                                  humanize_timedelta(
-                                      project.total_time_on(day))))
+            day_string = '{}: {}'.format(
+                day.date(), humanize_timedelta(project.total_time_on(day)))
+            results.append(day_string)
     elif print_format == 'combined':
-        print_days(project.day_range(start=start, end=end))
-    print()
-
-
-def print_days(days):
-    for day in days:
-        print('{}: {}'.format(day.datetime_date,
-                              humanize_timedelta(day.total_time)))
+        for day in project.day_range(start=start, end=end):
+            results.append('{}: {}'.format(
+                day.datetime_date, humanize_timedelta(day.total_time)))
+    click.echo_via_pager('\n'.join(results))
 
 
 @cli.command()
@@ -1015,9 +1032,11 @@ def start(context):
     project = context.obj['project']
     start = project.start()
     if start is None:
-        print('Already started')
+        click.echo('Already started')
+        click.echo('Total time:',
+                   humanize_timedelta(project.current_range_time))
     else:
-        print('Started at', start.time)
+        click.echo('Started at')
 
 
 @cli.command()
@@ -1027,11 +1046,11 @@ def stop(context):
     start = project.start_time
     end = project.stop()
     if end is None:
-        print('Not stopped')
+        click.echo('Already stopped')
     else:
-        print('Stopped at', end.time)
+        click.echo('Stopped at', end.time)
         difference = end - start
-        print(humanize_timedelta(difference))
+        click.echo(humanize_timedelta(difference))
 
 if __name__ == "__main__":
     obj = {}

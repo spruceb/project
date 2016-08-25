@@ -799,6 +799,7 @@ class Project:
         if DatePoint.now().same(end) and not result[-1]:
             # today could still be finished
             result[-1] = None
+        return result
 
     def total_time_in(self, date_list):
         """Get the total time in a list of dates
@@ -947,7 +948,7 @@ def streak(context, list_):
     project = context.obj['project']
     if context.invoked_subcommand is None:
         click.echo('Current streak: {}'.format(project.streak))
-        print_streak_string(project.streaks_boolean)
+        print_streak_string(project.streaks_boolean())
         streak_total = project.current_streak_time
         today_total = project.total_time_today
         click.echo('Total: {}'.format(humanize_timedelta(streak_total)))
@@ -1033,8 +1034,8 @@ def start(context):
     start = project.start()
     if start is None:
         click.echo('Already started')
-        click.echo('Total time:',
-                   humanize_timedelta(project.current_range_time))
+        click.echo('Total time: {}'.format(
+            humanize_timedelta(project.current_range_time)))
     else:
         click.echo('Started at')
 
@@ -1048,9 +1049,23 @@ def stop(context):
     if end is None:
         click.echo('Already stopped')
     else:
-        click.echo('Stopped at', end.time)
+        click.echo('Stopped at {}'.format(end.time))
         difference = end - start
         click.echo(humanize_timedelta(difference))
+
+@cli.command()
+@click.pass_context
+def pause(context):
+    project = context.obj['project']
+    if project.start_time is None:
+        click.echo("Can't pause, not started")
+        return
+    end = project.stop()
+    click.echo('Paused')
+    click.pause()
+    start = project.start()
+    click.echo('Restarted')
+    click.echo('Paused for {}'.format(humanize_timedelta(start - end)))
 
 if __name__ == "__main__":
     obj = {}

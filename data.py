@@ -186,8 +186,10 @@ class ConfigManager:
         global config locations. If none are found raises an error.
         """
         override = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
-        if os.path.isdir(cls.LOCAL_DIRNAME):
-            result = os.path.expanduser(cls.LOCAL_DIRNAME)
+        local_dir = os.path.expanduser(
+            os.path.join(os.getcwd(), cls.LOCAL_DIRNAME))
+        if os.path.isdir(local_dir):
+            result = local_dir
         elif override is not None and os.path.isdir(override):
             result = os.path.expanduser(override)
         elif os.path.isdir(cls.GLOBAL_DIRPATH):

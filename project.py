@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import click
+import os
 
-from data import ConfigManager
+from data import ConfigManager, ConfigLocations
 from controller import Project
 from utilities import humanize_timedelta
 
@@ -41,6 +42,8 @@ def char_input(prompt, last_invalid=False):
     click.echo(prompt, nl=False)
     result = click.getchar()
     click.echo()
+    if result == '\x03':
+        raise KeyboardInterrupt()
     return result
 
 def validated_char_input(prompt, valid_chars, invalid_callback=None):
@@ -62,16 +65,18 @@ def setup_noncommand():
                 'g: global config, i.e. make a new directory in your '
                 '~/.config.\n'
                 'l: local config, make a .project directory in the '
-                'current dir\n'
+                'selected dir\n'
                 'e: environment variable, set {} to a custom '
                 'directory'.format(ConfigManager.ENVIRONMENT_OVERRIDE))
             return False
 
     result = validated_char_input('g, l, e, or h for help: ', 'gle', help_)
-    if result == 'e':
-        filepath = os.path.expanduser(input('Filepath: '))
+    if result in 'le':
+        filepath = os.path.expanduser(input('File path (default to current): '))
     else:
         filepath = None
+    if result == 'l' and filepath is not None:
+        os.chdir(filepath)
     result = {'g': ConfigLocations.config,
               'l': ConfigLocations.local,
               'e': ConfigLocations.env}[result]

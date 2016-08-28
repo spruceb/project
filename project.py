@@ -185,10 +185,12 @@ class DatePoint:
     def split_range(self, timeframe=Timeframe.day):
         """Split a range that extends over multiple timefames"""
         assert self.is_range
-        first = DatePoint(self._first_date, self._first_date.ceil(timeframe))
-        second = DatePoint(self._second_date.floor(timeframe),
-                           self._second_date)
-        return (first, second)
+        first, second = self._first_date, self._first_date.ceil(timeframe)
+        while second < self._second_date:
+            yield DatePoint(first, second)
+            first = second + datetime.timedelta(microseconds=1)
+            second = first.ceil(timeframe)
+        yield DatePoint(first, self._second_date)
 
     def __eq__(self, other):
         """Compare to other, equal if dates compare equal"""
@@ -725,10 +727,9 @@ class Project:
                 self.data.add_date(this_range)
                 self._last_range = this_range
             else:
-                first, second = this_range.split_range()
-                self.data.add_date(first)
-                self.data.add_date(second)
-                self._last_range = second
+                for datepoint in this_range.split_range():
+                    self.data.add_date(datepoint)
+                    self._last_range = datepoint
             self.start_time = None
             return now
 

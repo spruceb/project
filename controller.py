@@ -177,7 +177,7 @@ class Project:
         that default to None, and all have the same desired default behavior.
         """
         def wrapped(*args, **kwargs):
-            if kwargs.get('start') is None:
+            if kwargs.get('start') is None and args[0].day_groups:
                 kwargs['start'] = args[0].day_groups[0].day
             if kwargs.get('end') is None:
                 kwargs['end'] = DatePoint.now()
@@ -198,6 +198,8 @@ class Project:
     @fill_boundries
     def filled_range(self, start=None, end=None):
         """Get the range of days between start and end"""
+        if start is None or end is None:
+            return []
         return list(arrow.Arrow.range(
             Timeframe.day, start.arrow, end.arrow))
 
@@ -234,7 +236,7 @@ class Project:
         result = [self.total_time_on(day) >= self.finished_threshold
                   for day in self.filled_range(start=start, end=end)]
         # end is today and today is not finished
-        if DatePoint.now().same(end) and not result[-1]:
+        if DatePoint.now().same(end) and result and not result[-1]:
             # today could still be finished
             result[-1] = None
         return result

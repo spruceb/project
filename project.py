@@ -73,6 +73,8 @@ def setup_noncommand():
     result = validated_char_input('g, l, e, or h for help: ', 'gle', help_)
     if result in 'le':
         filepath = os.path.expanduser(input('File path (default to current): '))
+        if filepath == '':
+            filepath = os.path.realpath(os.getcwd())
     else:
         filepath = None
     if result == 'l' and filepath is not None:
@@ -80,9 +82,7 @@ def setup_noncommand():
     result = {'g': ConfigLocations.config,
               'l': ConfigLocations.local,
               'e': ConfigLocations.env}[result]
-    overwrite = validated_char_input('Overwrite existing data? (y/n) ', 'yn')
-    overwrite = overwrite == 'y'
-    ConfigManager.setup(result, overwrite, filepath)
+    ConfigManager.setup(result, filepath)
     return ConfigManager()
 
 @click.group()
@@ -102,8 +102,8 @@ def cli(context, debug_time_period=None):
     try:
         config = ConfigManager()
     except (FileNotFoundError, ValueError):
-        click.echo('Please run setup', err=True)
         if context.invoked_subcommand != 'setup':
+            click.echo('Please run setup', err=True)
             context.abort()
         config = None
     project = Project(config) if config is not None else None
@@ -125,7 +125,7 @@ def finish(context):
     if finish is None:
         click.echo('Already finished today')
     else:
-        click.echo('Finished', finish.date)
+        click.echo('Finished {}'.format(finish.datetime_date))
 
 
 @cli.command(short_help='set up new installation')

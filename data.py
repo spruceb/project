@@ -26,13 +26,13 @@ class DataManager:
         return {'data_file': 'data.csv'}
 
     @classmethod
-    def setup(cls, overwrite, path, data_file, **kwargs):
+    def setup(cls, path, data_file, **kwargs):
         """Perform the necessary initial setup for the data
 
         Currently just makes the data file (a csv)
         """
         data_filepath = os.path.join(path, data_file)
-        if overwrite or not os.path.isfile(data_filepath):
+        if not os.path.isfile(data_filepath):
             with open(data_filepath, 'w'):
                 pass
 
@@ -87,13 +87,13 @@ class CacheManager:
         return {'cache_filename': 'cache.json'}
 
     @classmethod
-    def setup(cls, path, overwrite, cache_filename, **kwargs):
+    def setup(cls, path, cache_filename, **kwargs):
         """Perform the necessary initial setup for the data
 
         Makes the cache file and initializes the used values to None
         """
         cache_filepath = os.path.join(path, cache_filename)
-        if overwrite or not os.path.isfile(cache_filepath):
+        if not os.path.isfile(cache_filepath):
             with open(cache_filepath, 'w') as cache_file:
                 json.dump({'start_time': None}, cache_file)
 
@@ -186,17 +186,26 @@ class ConfigManager:
         global config locations. If none are found raises an error.
         """
         override = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
-        local_dir = os.path.expanduser(
-            os.path.join(os.getcwd(), cls.LOCAL_DIRNAME))
+        current_dir = os.path.expanduser(os.getcwd())
+        local_dir = os.path.join(current_dir, cls.LOCAL_DIRNAME)
+        result = None
         if os.path.isdir(local_dir):
-            result = local_dir
-        elif override is not None and os.path.isdir(override):
+            return os.path.realpath(local_dir)
+        else:
+            while (not os.path.isdir(local_dir) and
+                    current_dir != os.path.dirname(current_dir)):
+                current_dir = os.path.dirname(current_dir)
+                local_dir = os.path.join(current_dir, cls.LOCAL_DIRNAME)
+            if os.path.isdir(local_dir):
+                return os.path.realpath(local_dir)
+
+        if override is not None and os.path.isdir(override):
             result = os.path.expanduser(override)
         elif os.path.isdir(cls.GLOBAL_DIRPATH):
             result = os.path.expanduser(cls.GLOBAL_DIRPATH)
         else:
             raise FileNotFoundError('Config not found')
-        return os.path.abspath(result)
+        return os.path.realpath(result)
 
     @classmethod
     def validate(cls, config_location):
@@ -237,22 +246,24 @@ class ConfigManager:
             makedir(cls.GLOBAL_DIRPATH)
 
     @classmethod
-    def setup(cls, config_location_type=ConfigLocations.config,
-              overwrite=True, env_path=None):
+    def setup(cls, config_location_type=ConfigLocations.config, env_path=None):
         """Set up the file structures required to run from scratch
 
-        Can be given a type of config location to set up, and a flag
-        for whether to overwrite existing data. Not overwriting may cause
-        some issues, as proper validation is not yet done so this could leave
-        incomplete structures untouched.
+        Can be given a type of config location to set up. Does not
+        currently overwrite existing files. Not overwriting may cause
+        some issues, as proper validation is not yet done so this could
+        leave incomplete structures untouched. However it prevents data
+        loss until more complete validation is completed.
 
-        This ensures a 'config location' based on the argument exists. Then
-        inside it it creates a file structure consisting of a config file,
-        a cache folder, and a data folder. Data and Cache setups are called
-        on their respective folders. The default initialization arguments for
-        Data and Cache are stored in the config file. These arguments are meant
-        to potentially be modified by Data and Cache as needed and effectively
-        act as a "data store" for them.
+        This ensures a 'config location' based on the argument exists.
+        Then inside it it creates a file structure consisting of a
+        config file, a cache folder, and a data folder. Data and Cache
+        setups are called on their respective folders. The default
+        initialization arguments for Data and Cache are stored in the
+        config file. These arguments are meant to potentially be
+        modified by Data and Cache as needed and effectively act as a
+        "data store" for them.
+
         """
         try:
             config_location = cls._config_location()
@@ -260,7 +271,7 @@ class ConfigManager:
             cls.create_config_location(config_location_type, env_path)
             config_location = cls._config_location()
         config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
-        if not overwrite and os.path.isfile(config_filepath):
+        if os.path.isfile(config_filepath):
             with open(config_filepath, 'r') as config_file:
                 config = json.load(config_file)
                 data_init = config['data']
@@ -271,12 +282,8 @@ class ConfigManager:
             cache_init = CacheManager.default()
             data_path = os.path.join(config_location, cls.DATA_DIRNAME)
             cache_path = os.path.join(config_location, cls.CACHE_DIRNAME)
-            if os.path.isdir(cache_path) and overwrite:
-                rmtree(cache_path)
             if not os.path.isdir(cache_path):
                 os.mkdir(cache_path)
-            if os.path.isdir(data_path) and overwrite:
-                rmtree(data_path)
             if not os.path.isdir(data_path):
                 os.mkdir(data_path)
             cache_init['path'] = cache_path
@@ -285,8 +292,8 @@ class ConfigManager:
             config['cache'] = cache_init
             with open(config_filepath, 'w') as config_file:
                 json.dump(config, config_file)
-        DataManager.setup(overwrite=overwrite, **data_init)
-        CacheManager.setup(overwrite=overwrite, **cache_init)
+        DataManager.setup(**data_init)
+        CacheManager.setup(**cache_init)
 
     def save_data(self):
         """Persist data that may have changed during runtime

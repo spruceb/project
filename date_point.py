@@ -13,7 +13,6 @@ class Timeframe:
     minute = 'minute'
     second = 'second'
 
-
 class DatePoint:
     """Wrapper around dates and date ranges"""
 
@@ -119,6 +118,9 @@ class DatePoint:
         """If this DatePoint's timeframe is before the others"""
         return self.ordinal(timeframe) < other.ordinal(timeframe)
 
+    def floor(self, timeframe):
+        return self._first_date.floor(timeframe)
+
     @property
     def date(self):
         """The 'date' version of this DatePoint, i.e. without time info"""
@@ -189,33 +191,35 @@ class DatePoint:
         """Get a representation of this DatePoint"""
         return self.freeze()
 
-class DayGroup(DatePoint):
-    """A group of DatePoints in a single day
+class TimeframeGroup(DatePoint):
+    """A group of DatePoints in a single timeframe
 
-    A DayGroup inherits from DatePoint and in most ways can be treated
+    A TimeframeGroup inherits from DatePoint and in most ways can be treated
     like one. It differs in that it stores a list of DatePoints rather than
-    one or two `arrow.Arrow` dates. It uses the `date` (i.e. the day) of the
+    one or two `arrow.Arrow` dates. It uses the timeframe floor of the
     first component date for all DatePoint operations that require a
     `_first_date`.
 
-    Used in various places in `Project` when the individual DatePoints in a day
-    aren't as relevant as the aggregate day information.
+    Used in various places in `Project` when the individual DatePoints in a
+    timeframe aren't as relevant as the aggregate information.
     """
-    def __init__(self, date_list):
-        """Create a new DayGroup from a list of dates in the same day"""
+    def __init__(self, date_list, timeframe=Timeframe.day):
+        """Create a new group from a list of dates in the same timeframe"""
         assert len(date_list) > 0
         self.date_list = date_list
-        self.day = date_list[0].date
+        self.timeframe = timeframe
+        self.group_date = DatePoint(date_list[0].floor(timeframe))
 
     @classmethod
-    def group_days(cls, datepoint_list):
-        """Group a list of DatePoints by the day they occurred on
+    def group_timeframes(cls, datepoint_list, timeframe=Timeframe.day):
+        """Group a list of DatePoints by the timeframe they occurred on
 
         This will return a list of lists. Each of those lists could be
-        validly used to construct a DayGroup.
+        validly used to construct a TimeframeGroup.
         """
         return [cls(dates) for dates in
-                binary_groupby(datepoint_list, lambda x, y: x.same(y))]
+                binary_groupby(datepoint_list,
+                               lambda x, y: x.same(y, timeframe))]
 
     @property
     def total_time(self):
@@ -223,20 +227,16 @@ class DayGroup(DatePoint):
         return sum((date.total_time for date in self.date_list),
                    datetime.timedelta())
 
-    def ordinal(self, timeframe=None, use_start=None):
-        """Gets the 'prototypical' day's ordinal value
-
-        This will not work/compare correctly with DatePoint methods using
-        different timeframes. This entire class is currently tied to days.
-        """
-        return self.day.ordinal(timeframe=Timeframe.day)
+    def ordinal(self, timeframe=Timeframe.day, use_start=None):
+        """Gets the 'prototypical' timeframe's ordinal value"""
+        return self.group_date.ordinal(timeframe)
 
     @property
     def is_range(self):
-        """DayGroups are not ranges for the purpose of DatePoint methods"""
+        """TimeframeGroups are not ranges for the purpose of DatePoint methods"""
         return False
 
     @property
     def _first_date(self):
         """Return prototypical day for DatePoint compatibility"""
-        return self.day._first_date
+        return self.group_date._first_date

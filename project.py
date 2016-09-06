@@ -155,7 +155,7 @@ def streak(context):
         click.echo('Current streak: {}'.format(project.streak))
         print_streak_string(project.streaks_boolean())
         streak_total = project.current_streak_time
-        today_total = project.total_time_today
+        today_total = project.total_time_current
         click.echo('Today: {}'.format(humanize_timedelta(today_total)))
 
 

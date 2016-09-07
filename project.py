@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import click
 import os
+from traceback import print_exc
 
 from data import ConfigManager, ConfigLocations
 from controller import Project
@@ -83,7 +84,7 @@ def setup_noncommand():
               'l': ConfigLocations.local,
               'e': ConfigLocations.env}[result]
     ConfigManager.setup(result, filepath)
-    return ConfigManager()
+    return ConfigManager.find_config()
 
 @click.group()
 @click.pass_context
@@ -100,9 +101,10 @@ def cli(context, debug_time_period=None):
     ranges, or finish to just mark entire days completed
     """
     try:
-        config = ConfigManager()
+        config = ConfigManager.find_config()
     except (FileNotFoundError, ValueError):
         if context.invoked_subcommand != 'setup':
+            print_exc()
             click.echo('Please run setup', err=True)
             context.abort()
         config = None

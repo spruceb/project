@@ -2,9 +2,10 @@ import csv
 import json
 import os
 import os.path
-from shutil import rmtree
+from datetime import timedelta
+import pprint
 
-from date_point import DatePoint
+from date_point import DatePoint, Timeframe
 
 class DataManager:
     """Wraps the mechanism for persisting and querying work dates and times
@@ -151,7 +152,8 @@ class ConfigManager:
     # filename for the actual config file
     CONFIG_FILENAME = 'project.config'
 
-    def __init__(self):
+    def __init__(self, data_config, cache_config, all_config,
+                 config_path=None, timeframe=None, finished_threshold=None):
         """Create a new config manager, checking all the default locations
 
         This uses the `_config_location` class method to try to find an
@@ -160,23 +162,71 @@ class ConfigManager:
         data and cache with the init data they store into config (on setup
         or during normal running).
         """
-        self.config_path = self._config_location()
+        if config_path is None:
+            # TODO: log warning here
+            config_path = self._config_location()
+        print(config_path)
+        self.config_path = config_path
         self.config_filepath = os.path.join(self.config_path,
                                             self.CONFIG_FILENAME)
+        if timeframe is None:
+            timeframe = Timeframe.day
+        self.timeframe = timeframe
+        if finished_threshold is None:
+            finished_threshold = timedelta(hours=1)
+        self.finished_threshold = finished_threshold
+        self._all_config = all_config
+        self._data_config = data_config
+        self._cache_config = cache_config
+        self.data = DataManager(self, **data_config)
+        self.cache = CacheManager(self, **cache_config)
+
+    def freeze(self):
+        frozen = {
+            'data': self._data_config,
+            'cache': self._cache_config,
+            'timeframe': self.timeframe,
+            'finished_threshold': self.finished_threshold.total_seconds(),
+        }
+        return frozen
+
+    @classmethod
+    def unfreeze(cls, frozen, config_path=None):
+        """Initialize from a frozen dict"""
+        if config_path is None:
+            config_path = cls._config_location()
+        timeframe = frozen.get('timeframe')
+        finished_threshold = frozen.get('finished_threshold')
+        if finished_threshold is not None:
+            finished_threshold = timedelta(seconds=finished_threshold)
+        # if there's no data or cache config an error has occurred
+        data_config = frozen['data']
+        cache_config = frozen['cache']
+        return cls(data_config,
+                   cache_config,
+                   frozen,
+                   config_path,
+                   timeframe,
+                   finished_threshold)
+
+    @classmethod
+    def find_config(cls):
+        config_path = cls._config_location()
+        config_filepath = os.path.join(config_path,
+                                       cls.CONFIG_FILENAME)
         try:
-            with open(self.config_filepath, 'r') as config_file:
+            with open(config_filepath, 'r') as config_file:
                 config_string = config_file.read()
-                self._backup = config_string
-                self._config = json.loads(config_string)
+                backup = config_string
+                config = json.loads(config_string)
+                return cls.unfreeze(config, config_path)
         except json.decoder.JSONDecodeError:
             raise ValueError('Invalid data')
-        self.data = DataManager(self, **self.config['data'])
-        self.cache = CacheManager(self, **self.config['cache'])
 
     @property
     def config(self):
         """Get the config dict stored in the config file"""
-        return self._config
+        return self._all_config
 
     @classmethod
     def _config_location(cls):
@@ -263,7 +313,6 @@ class ConfigManager:
         config file. These arguments are meant to potentially be
         modified by Data and Cache as needed and effectively act as a
         "data store" for them.
-
         """
         try:
             config_location = cls._config_location()
@@ -271,12 +320,17 @@ class ConfigManager:
             cls.create_config_location(config_location_type, env_path)
             config_location = cls._config_location()
         config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
+        no_file = True
         if os.path.isfile(config_filepath):
-            with open(config_filepath, 'r') as config_file:
-                config = json.load(config_file)
-                data_init = config['data']
-                cache_init = config['cache']
-        else:
+            try:
+                with open(config_filepath, 'r') as config_file:
+                    config = json.load(config_file)
+                    data_init = config['data']
+                    cache_init = config['cache']
+                    no_file = False
+            except json.decoder.JSONDecodeError:
+                pass
+        if no_file:
             config = {}
             data_init = DataManager.default()
             cache_init = CacheManager.default()
@@ -302,12 +356,14 @@ class ConfigManager:
         out what to do if the data in the file has been modified since the
         class was initialized from it. However this is not currently in use.
         """
-        if self._config is not None:
+        if self._all_config is not None:
             with open(self.config_filepath, 'r') as config_file:
-                contents = config_file.read()
-            if contents != self._backup:
-                pass # do nothing for now, be safer later
+                contents_dict = json.load(config_file)
+            if contents_dict != self._all_config:
+                print('WARNING: overwriting changed data!')
+                print('Pre-overwrite file state:')
+                pprint(contents_dict)
             with open(self.config_filepath, 'w') as config_file:
-                json.dump(self._config, config_file)
+                json.dump(self.freeze(), config_file)
         self.data.save_data()
         self.cache.save_data()

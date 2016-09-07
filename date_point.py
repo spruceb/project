@@ -52,13 +52,13 @@ class DatePoint:
         return header + body
 
     @classmethod
-    def unfreeze(cls, freezed):
+    def unfreeze(cls, frozen):
         """Create a DatePoint object from a frozen serialization of one"""
         try:
-            is_range = cls.RANGE_INDICATORS.index(freezed[0])
+            is_range = cls.RANGE_INDICATORS.index(frozen[0])
         except ValueError:
             return
-        first_date = freezed[1:]
+        first_date = frozen[1:]
         second_date = None
         if is_range:
             first_date, second_date = first_date.split(cls.SEPERATOR_CHAR)

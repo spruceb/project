@@ -37,8 +37,8 @@ class Project:
         self.config = config
         self.cache = self.config.cache
         self.data = self.config.data
-        self.finished_threshold = timedelta(hours=1)
-        self.timeframe = Timeframe.day
+        self.finished_threshold = self.config.finished_threshold
+        self.timeframe = self.config.timeframe
         self._last_range = None
         atexit.register(self.close)
 

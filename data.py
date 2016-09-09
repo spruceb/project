@@ -296,7 +296,8 @@ class ConfigManager:
             makedir(cls.GLOBAL_DIRPATH)
 
     @classmethod
-    def setup(cls, config_location_type=ConfigLocations.config, env_path=None):
+    def setup(cls, config_location_type=None, filepath=None, timeframe=None,
+              threshold=None):
         """Set up the file structures required to run from scratch
 
         Can be given a type of config location to set up. Does not
@@ -314,10 +315,17 @@ class ConfigManager:
         modified by Data and Cache as needed and effectively act as a
         "data store" for them.
         """
+        if config_location_type is None:
+            config_location_type = ConfigLocations.config
+        if timeframe is None:
+            timeframe = Timeframe.day
+        if threshold is None:
+            threshold = 3600
+
         try:
             config_location = cls._config_location()
         except FileNotFoundError:
-            cls.create_config_location(config_location_type, env_path)
+            cls.create_config_location(config_location_type, filepath)
             config_location = cls._config_location()
         config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
         no_file = True
@@ -344,6 +352,8 @@ class ConfigManager:
             data_init['path'] = data_path
             config['data'] = data_init
             config['cache'] = cache_init
+            config['timeframe'] = timeframe
+            config['finished_threshold'] = threshold
             with open(config_filepath, 'w') as config_file:
                 json.dump(config, config_file)
         DataManager.setup(**data_init)

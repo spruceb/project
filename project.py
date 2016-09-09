@@ -4,6 +4,7 @@ import os
 from traceback import print_exc
 
 from data import ConfigManager, ConfigLocations
+from date_point import Timeframe
 from controller import Project
 from utilities import humanize_timedelta
 
@@ -43,7 +44,7 @@ def char_input(prompt, last_invalid=False):
     click.echo(prompt, nl=False)
     result = click.getchar()
     click.echo()
-    if result == '\x03':
+    if result in ('\x03', 'q'):
         raise KeyboardInterrupt()
     return result
 
@@ -130,16 +131,73 @@ def finish(context):
         click.echo('Finished {}'.format(finish.datetime_date))
 
 
+def interactive_setup(context, param, value):
+    def help_(char):
+            if char == 'h':
+                click.echo(
+                    'g: global config, i.e. make a new directory in your '
+                    '~/.config.\n'
+                    'l: local config, make a .project directory in the '
+                    'selected dir\n'
+                    'e: environment variable, set {} to a custom '
+                    'directory'.format(ConfigManager.ENVIRONMENT_OVERRIDE))
+            return char in 'gle'
+
+    location_char = validated_char_input('g, l, e, or h for help: ', 'gle', help_)
+    location = None
+    if location_char == 'g':
+        location = ConfigLocations.config
+    elif location_char == 'l':
+        location = ConfigLocations.local
+    elif location_char == 'e':
+        location = ConfigLocations.env
+    filepath = None
+    if location in (ConfigLocations.local, ConfigLocations.env):
+        filepath = click.prompt('Config folder path',
+                                        type=click.Path(file_okay=False, dir_okay=True),
+                                default='')
+        if not filepath:
+            filepath = os.path.realpath(os.getcwd())
+        if location == ConfigLocations.local:
+            os.chdir(filepath)
+
+    if click.confirm('Continue with defaults for extra options?', default=True):
+        ConfigManager.setup(location, filepath)
+    else:
+        timeframe = click.prompt(
+            'What timeframe do you want to use?',
+            type=click.Choice(Timeframe.timeframes()),
+            default=Timeframe.day)
+        threshold = click.prompt(
+            'What per-timeframe threshold do you want?',
+            default=3600)
+        ConfigManager.setup(location, filepath, timeframe, threshold)
+    context.exit()
+
 @cli.command(short_help='set up new installation')
+@click.option('--interactive', '-i', is_flag=True, callback=interactive_setup,
+              is_eager=True, expose_value=False)
+@click.option('--global', '-g', 'location', flag_value=ConfigLocations.config)
+@click.option('--local', '-l', 'location', flag_value=ConfigLocations.local)
+@click.option('--environment', '-e', 'location')
+@click.option('--finished-threshold', '-f', 'threshold', type=click.FLOAT)
+@click.option('--timeframe', '-t', type=click.Choice(Timeframe.timeframes()))
 @click.pass_context
-def setup(context):
+def setup(context, location, threshold, timeframe):
     """Set up a new project config location
 
     Interactively queries the user for initial config and where to store
     critical startup files/data.
     """
-    config = setup_noncommand()
-    context.obj['project'] = Project(config)
+    if any(v is not None for k, v in context.params.items()):
+        filepath = None
+        if location not in (ConfigLocations.config, ConfigLocations.local):
+            filepath = location
+            location = ConfigLocations.env
+        ConfigManager.setup(location, filepath, threshold, timeframe)
+    else:
+        click.confirm('Setup with all default values?', abort=True, default=True)
+        ConfigManager.setup()
 
 
 @cli.group(invoke_without_command=True,
@@ -189,11 +247,11 @@ def list_streaks(context):
 @cli.command(short_help='time info about individual days')
 @click.option('--start', '-s', default=None, help='when to begin the range')
 @click.option('--end', '-e', default=None, help='when to end the range')
-@click.option('--streak', 'print_format', is_flag=True, flag_value='streak',
+@click.option('--streak', 'print_format', flag_value='streak',
               default=True, help='default format flag: separate finished days into streaks')
-@click.option('--combined', 'print_format', is_flag=True, flag_value='combined',
+@click.option('--combined', 'print_format', flag_value='combined',
               help='format flag: print all days with any time')
-@click.option('--empty', 'print_format', is_flag=True, flag_value='empty',
+@click.option('--empty', 'print_format', flag_value='empty',
               help='format flag: print days since start including empty ones')
 @click.pass_context
 def times(context, start, end, print_format):

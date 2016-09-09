@@ -13,6 +13,11 @@ class Timeframe:
     minute = 'minute'
     second = 'second'
 
+    @classmethod
+    def timeframes(cls):
+        return [attribute for attribute in dir(cls)
+                if not attribute.startswith('__')]
+
 class DatePoint:
     """Wrapper around dates and date ranges"""
 

@@ -6,7 +6,6 @@ from traceback import print_exc
 from data import ConfigManager, ConfigLocations
 from date_point import Timeframe
 from controller import Project
-from utilities import humanize_timedelta
 
 # "cli interface" helper functions
 
@@ -33,6 +32,25 @@ def print_streak_string(day_streak_booleans):
         else:
             click.echo(unfinished_square(), nl=False)
     click.echo()
+
+def humanize_timedelta(timedelta):
+    """Print out nice-reading strings for time periods"""
+    if timedelta.total_seconds() == 0:
+        return 'nothing'
+    result = []
+    units = {'hour': int(timedelta.total_seconds() // 3600),
+             'minute': int(timedelta.total_seconds() % 3600) // 60,
+             'second': int(timedelta.total_seconds() % 60)}
+    keys = ['hour', 'minute', 'second']
+    if units['hour'] >= 1:
+        del units['second']
+        del keys[-1]
+    for unit in keys:
+        num = units[unit]
+        if num:
+            result.append('{} {}{}'.format(num, unit, 's' if num != 1 else ''))
+    return ', '.join(result)
+
 
 # Below are the command line interface functions, using the `click` library.
 # See `click`'s documentation for details on how this works. Currently mostly
@@ -294,11 +312,12 @@ def debug(context):
     project = context.obj['project']
     import ipdb; ipdb.set_trace()
 
-
 @cli.command(short_help='TODO: let you change project settings')
+@click.option('--timeframe', type=click.Choice(Timeframe.timeframes()))
+@click.option('--list', '-l', 'list_', is_flag=True)
 @click.pass_context
-def config(context):
-    pass
+def config(context, list_):
+
 
 
 @cli.command(short_help='begin work on the project')

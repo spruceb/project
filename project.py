@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import click
 import os
+import atexit
 from traceback import print_exc
+from pprint import pformat
 
 from data import ConfigManager, ConfigLocations
 from date_point import Timeframe
@@ -189,7 +191,8 @@ def interactive_setup(context, param, value):
         threshold = click.prompt(
             'What per-timeframe threshold do you want?',
             default=3600)
-        ConfigManager.setup(location, filepath, timeframe, threshold)
+        ConfigManager.setup(location, filepath)
+        ConfigManager.configure(threshold=threshold, timeframe=timeframe)
     context.exit()
 
 @cli.command(short_help='set up new installation')
@@ -212,7 +215,8 @@ def setup(context, location, threshold, timeframe):
         if location not in (ConfigLocations.config, ConfigLocations.local):
             filepath = location
             location = ConfigLocations.env
-        ConfigManager.setup(location, filepath, threshold, timeframe)
+        ConfigManager.setup(location, filepath)
+        ConfigManager.configure(threshold=threshold, timeframe=timeframe)
     else:
         click.confirm('Setup with all default values?', abort=True, default=True)
         ConfigManager.setup()
@@ -312,12 +316,24 @@ def debug(context):
     project = context.obj['project']
     import ipdb; ipdb.set_trace()
 
-@cli.command(short_help='TODO: let you change project settings')
-@click.option('--timeframe', type=click.Choice(Timeframe.timeframes()))
-@click.option('--list', '-l', 'list_', is_flag=True)
-@click.pass_context
-def config(context, list_):
 
+@cli.group(invoke_without_command=True,
+           short_help='TODO: let you change project settings')
+@click.option('--timeframe', type=click.Choice(Timeframe.timeframes()))
+@click.option('--finished-threshold', '-f', 'threshold', type=click.FLOAT)
+@click.pass_context
+def config(context, timeframe, threshold):
+    if context.invoked_subcommand is not None:
+        return
+    project = context.obj['project']
+    atexit.unregister(project.close)
+    ConfigManager.configure(timeframe=timeframe, threshold=threshold)
+
+@config.command('list')
+def list_config():
+    config = ConfigManager.find_config()
+    for k, v in config.freeze().items():
+        print('{}: {}'.format(k, pformat(v)))
 
 
 @cli.command(short_help='begin work on the project')

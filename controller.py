@@ -257,4 +257,4 @@ class Project:
 
     def close(self):
         """Persist data that may have changed during runtime"""
-        self.config.save_data()
+        self.config.save()

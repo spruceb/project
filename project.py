@@ -40,17 +40,19 @@ def humanize_timedelta(timedelta):
     if timedelta.total_seconds() == 0:
         return 'nothing'
     result = []
-    units = {'hour': int(timedelta.total_seconds() // 3600),
-             'minute': int(timedelta.total_seconds() % 3600) // 60,
-             'second': int(timedelta.total_seconds() % 60)}
-    keys = ['hour', 'minute', 'second']
-    if units['hour'] >= 1:
-        del units['second']
-        del keys[-1]
-    for unit in keys:
-        num = units[unit]
-        if num:
-            result.append('{} {}{}'.format(num, unit, 's' if num != 1 else ''))
+    total = timedelta.total_seconds()
+    hour = int(int(total) // 3600)
+    minute = (total % 3600) // 60
+    second = total % 60
+    words = lambda x, y: '{} {}{}'.format(x, y, 's' if x != 1 else '')
+    if hour:
+        result.append(words(hour, 'hour'))
+    if minute:
+        result.append(words(minute, 'minute'))
+    if not (hour or minute) and second < 1:
+        result.append(words(second, 'second'))
+    elif not hour:
+        result.append(words(int(second), 'second'))
     return ', '.join(result)
 
 
@@ -221,6 +223,15 @@ def setup(context, location, threshold, timeframe):
         click.confirm('Setup with all default values?', abort=True, default=True)
         ConfigManager.setup()
 
+HUMANIZED_CURRENT_TIMEFRAMES = {
+    Timeframe.year: 'This year',
+    Timeframe.month: 'This month',
+    Timeframe.week: 'This week',
+    Timeframe.day: 'Today',
+    Timeframe.hour: 'This hour',
+    Timeframe.minute: 'Current minute',
+    Timeframe.second: 'Right now'
+}
 
 @cli.group(invoke_without_command=True,
            short_help='show info about the current streak')
@@ -238,7 +249,8 @@ def streak(context):
         print_streak_string(project.streaks_boolean())
         streak_total = project.current_streak_time
         today_total = project.total_time_current
-        click.echo('Today: {}'.format(humanize_timedelta(today_total)))
+        click.echo('{}: {}'.format(humanize_timedelta(today_total)),
+                   HUMANIZED_CURRENT_TIMEFRAMES[project.timeframe])
 
 
 @streak.command(short_help='total time spent in streak')

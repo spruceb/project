@@ -92,7 +92,7 @@ class DatePoint:
         elif timeframe == Timeframe.month:
             return date.year * 12 + date.month
         elif timeframe == Timeframe.week:
-            iso = date.isocalender()
+            iso = date.isocalendar()
             return iso[1]
         elif timeframe == Timeframe.day:
             return date.toordinal()

@@ -54,7 +54,7 @@ class DataManager:
             self._file_modified = False
         return self._date_list
 
-    def save_data(self):
+    def save(self):
         """Persist any data that may have changed during runtime
 
         Since `add_data` is the only mutating method and it persists the data,
@@ -112,7 +112,7 @@ class CacheManager:
             value = value.freeze()
         self.cache['start_time'] = value
 
-    def save_data(self):
+    def save(self):
         """Persist any data that may have changed during runtime"""
         if self._cache is not None:
             with open(self.cache_path, 'w') as cache_file:
@@ -152,8 +152,8 @@ class ConfigManager:
     # filename for the actual config file
     CONFIG_FILENAME = 'project.config'
 
-    def __init__(self, data_config, cache_config, all_config,
-                 config_path=None, timeframe=None, finished_threshold=None):
+    def __init__(self, data_config, cache_config, timeframe=None,
+                 finished_threshold=None):
         """Create a new config manager, checking all the default locations
 
         This uses the `_config_location` class method to try to find an
@@ -162,39 +162,49 @@ class ConfigManager:
         data and cache with the init data they store into config (on setup
         or during normal running).
         """
-        if config_path is None:
-            # TODO: log warning here
-            config_path = self._config_location()
-        print(config_path)
-        self.config_path = config_path
-        self.config_filepath = os.path.join(self.config_path,
-                                            self.CONFIG_FILENAME)
+        self.config_dirpath, self.location_type = self._config_location()
+        self.config_filepath = self._config_filepath()
         if timeframe is None:
             timeframe = Timeframe.day
         self.timeframe = timeframe
         if finished_threshold is None:
             finished_threshold = timedelta(hours=1)
         self.finished_threshold = finished_threshold
-        self._all_config = all_config
         self._data_config = data_config
         self._cache_config = cache_config
         self.data = DataManager(self, **data_config)
         self.cache = CacheManager(self, **cache_config)
 
-    def freeze(self):
-        frozen = {
-            'data': self._data_config,
-            'cache': self._cache_config,
-            'timeframe': self.timeframe,
-            'finished_threshold': self.finished_threshold.total_seconds(),
-        }
-        return frozen
+    @classmethod
+    def to_dict(cls, data_config=None, cache_config=None, timeframe=None,
+                threshold=None):
+        config_dict = {}
+        if data_config is not None:
+            config_dict['data'] = data_config
+        if cache_config is not None:
+            config_dict['cache'] = cache_config
+        if timeframe is not None:
+            config_dict['timeframe'] = timeframe
+        if threshold is not None:
+            config_dict['finished_threshold'] = threshold
+        return config_dict
 
     @classmethod
-    def unfreeze(cls, frozen, config_path=None):
+    def default(cls):
+        return {
+            'timeframe': Timeframe.day,
+            'finished_threshold': 3600
+        }
+
+    def freeze(self):
+        return self.to_dict(self._data_config,
+                            self._cache_config,
+                            self.timeframe,
+                            self.finished_threshold.total_seconds())
+
+    @classmethod
+    def unfreeze(cls, frozen):
         """Initialize from a frozen dict"""
-        if config_path is None:
-            config_path = cls._config_location()
         timeframe = frozen.get('timeframe')
         finished_threshold = frozen.get('finished_threshold')
         if finished_threshold is not None:
@@ -204,41 +214,63 @@ class ConfigManager:
         cache_config = frozen['cache']
         return cls(data_config,
                    cache_config,
-                   frozen,
-                   config_path,
                    timeframe,
                    finished_threshold)
 
     @classmethod
-    def find_config(cls):
-        config_path = cls._config_location()
-        config_filepath = os.path.join(config_path,
-                                       cls.CONFIG_FILENAME)
+    def from_file(cls):
+        dirpath = cls._config_location()
+        filepath = cls._config_filepath()
         try:
-            with open(config_filepath, 'r') as config_file:
-                config_string = config_file.read()
-                backup = config_string
-                config = json.loads(config_string)
-                return cls.unfreeze(config, config_path)
+            with open(filepath, 'r') as config_file:
+                result = json.load(config_file)
+                if result is None:
+                    raise ValueError('Invalid config')
+                return result
         except json.decoder.JSONDecodeError:
-            raise ValueError('Invalid data')
-
-    @property
-    def config(self):
-        """Get the config dict stored in the config file"""
-        return self._all_config
+            raise ValueError('Invalid config')
 
     @classmethod
-    def _config_location(cls):
-        """Check and return possible config locations in preference order
+    def find_config(cls):
+        config = cls.from_file()
+        return cls.unfreeze(config)
 
-        Tries to look at local, then environment-variable set, then default
-        global config locations. If none are found raises an error.
-        """
-        override = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
+    @classmethod
+    def save_dict(cls, config_dict):
+        filepath = cls._config_filepath()
+        with open(filepath, 'r') as config_file:
+            contents_dict = json.load(config_file)
+            if contents_dict != config_dict:
+                print('WARNING: overwriting changed data!')
+                print('Pre-overwrite file state:')
+                pprint.pprint(contents_dict)
+                print('Overwriting with:')
+                pprint.pprint(config_dict)
+        with open(filepath, 'w') as config_file:
+            json.dump(config_dict, config_file)
+
+    @classmethod
+    def merge_config(cls, config_dict):
+        with open(cls._config_filepath(), 'r') as config_file:
+            old_config = json.load(config_file)
+        old_config.update(config_dict)
+        cls.save_dict(old_config)
+
+    def save(self):
+        self.save_dict(self.freeze())
+        self.data.save()
+        self.cache.save()
+
+    @classmethod
+    def configure(cls, data_config=None, cache_config=None,
+                  timeframe=None, threshold=None):
+        config_dict = cls.to_dict(data_config, cache_config, timeframe, threshold)
+        cls.merge_config(config_dict)
+
+    @classmethod
+    def _find_local(cls):
         current_dir = os.path.expanduser(os.getcwd())
         local_dir = os.path.join(current_dir, cls.LOCAL_DIRNAME)
-        result = None
         if os.path.isdir(local_dir):
             return os.path.realpath(local_dir)
         else:
@@ -247,15 +279,48 @@ class ConfigManager:
                 current_dir = os.path.dirname(current_dir)
                 local_dir = os.path.join(current_dir, cls.LOCAL_DIRNAME)
             if os.path.isdir(local_dir):
-                return os.path.realpath(local_dir)
+                return (os.path.realpath(local_dir), ConfigLocations.local)
 
-        if override is not None and os.path.isdir(override):
-            result = os.path.expanduser(override)
-        elif os.path.isdir(cls.GLOBAL_DIRPATH):
-            result = os.path.expanduser(cls.GLOBAL_DIRPATH)
-        else:
-            raise FileNotFoundError('Config not found')
-        return os.path.realpath(result)
+    @classmethod
+    def _find_global(cls):
+        if os.path.isdir(cls.GLOBAL_DIRPATH):
+            return os.path.realpath(cls.GLOBAL_DIRPATH)
+
+    @classmethod
+    def _find_env(cls):
+        path = os.environ.get(cls.ENVIRONMENT_OVERRIDE)
+        if path is not None and os.path.isdir(path):
+            return os.path.realpath(path)
+
+    @classmethod
+    def _config_location(cls):
+        """Check and return possible config locations in preference order
+
+        Tries to look at local, then environment-variable set, then default
+        global config locations. If none are found raises an error.
+        """
+        local = cls._find_local()
+        if local is not None:
+            return local, ConfigLocations.local
+        global_path = cls._find_global()
+        if global_path is not None:
+            return global_path, ConfigLocations.config
+        env = cls.find_env()
+        if env is not None:
+            return env, ConfigLocations.env
+        raise FileNotFoundError("Can't find config files")
+
+    @classmethod
+    def _config_dirpath(cls):
+        return cls._config_location()[0]
+
+    @classmethod
+    def _config_location_type(cls):
+        return cls._config_location()[0]
+
+    @classmethod
+    def _config_filepath(cls):
+        return os.path.join(cls._config_dirpath(), cls.CONFIG_FILENAME)
 
     @classmethod
     def validate(cls, config_location):
@@ -282,11 +347,11 @@ class ConfigManager:
 
     @classmethod
     def create_config_location(cls, config_location_type,
-                               make_intermediate=True, env_path=None):
+                               make_intermediate=True, dir_path=None):
         """Make the directory required for certain config locations"""
         makedir = os.makedirs if make_intermediate else os.mkdir
         if config_location_type == ConfigLocations.local:
-            makedir(cls.LOCAL_DIRNAME)
+            makedir(os.path.join(dir_path, cls.LOCAL_DIRNAME))
         elif config_location_type == ConfigLocations.env:
             if env_path is not None:
                 makedir(env_path)
@@ -296,8 +361,7 @@ class ConfigManager:
             makedir(cls.GLOBAL_DIRPATH)
 
     @classmethod
-    def setup(cls, config_location_type=None, filepath=None, timeframe=None,
-              threshold=None):
+    def setup(cls, config_location_type=None, filepath=None):
         """Set up the file structures required to run from scratch
 
         Can be given a type of config location to set up. Does not
@@ -317,29 +381,21 @@ class ConfigManager:
         """
         if config_location_type is None:
             config_location_type = ConfigLocations.config
-        if timeframe is None:
-            timeframe = Timeframe.day
-        if threshold is None:
-            threshold = 3600
-
         try:
-            config_location = cls._config_location()
+            config_dir = cls._config_dirpath()
         except FileNotFoundError:
             cls.create_config_location(config_location_type, filepath)
-            config_location = cls._config_location()
-        config_filepath = os.path.join(config_location, cls.CONFIG_FILENAME)
-        no_file = True
+            config_dir = cls._config_dirpath()
+        config_filepath = cls._config_filepath()
         if os.path.isfile(config_filepath):
             try:
                 with open(config_filepath, 'r') as config_file:
                     config = json.load(config_file)
                     data_init = config['data']
                     cache_init = config['cache']
-                    no_file = False
-            except json.decoder.JSONDecodeError:
-                pass
-        if no_file:
-            config = {}
+            except (json.decoder.JSONDecodeError, KeyError):
+                print('Invalid config found. Not overwriting.')
+        else:
             data_init = DataManager.default()
             cache_init = CacheManager.default()
             data_path = os.path.join(config_location, cls.DATA_DIRNAME)
@@ -350,30 +406,7 @@ class ConfigManager:
                 os.mkdir(data_path)
             cache_init['path'] = cache_path
             data_init['path'] = data_path
-            config['data'] = data_init
-            config['cache'] = cache_init
-            config['timeframe'] = timeframe
-            config['finished_threshold'] = threshold
-            with open(config_filepath, 'w') as config_file:
-                json.dump(config, config_file)
+
+            cls.configure(data_config, cache_config)
         DataManager.setup(**data_init)
         CacheManager.setup(**cache_init)
-
-    def save_data(self):
-        """Persist data that may have changed during runtime
-
-        Hooks are in place here for rudimentary 'backups', i.e. figuring
-        out what to do if the data in the file has been modified since the
-        class was initialized from it. However this is not currently in use.
-        """
-        if self._all_config is not None:
-            with open(self.config_filepath, 'r') as config_file:
-                contents_dict = json.load(config_file)
-            if contents_dict != self._all_config:
-                print('WARNING: overwriting changed data!')
-                print('Pre-overwrite file state:')
-                pprint(contents_dict)
-            with open(self.config_filepath, 'w') as config_file:
-                json.dump(self.freeze(), config_file)
-        self.data.save_data()
-        self.cache.save_data()

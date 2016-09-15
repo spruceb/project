@@ -42,7 +42,7 @@ def humanize_timedelta(timedelta):
     result = []
     total = timedelta.total_seconds()
     hour = int(int(total) // 3600)
-    minute = (total % 3600) // 60
+    minute = int((total % 3600) // 60)
     second = total % 60
     words = lambda x, y: '{} {}{}'.format(x, y, 's' if x != 1 else '')
     if hour:
@@ -249,8 +249,8 @@ def streak(context):
         print_streak_string(project.streaks_boolean())
         streak_total = project.current_streak_time
         today_total = project.total_time_current
-        click.echo('{}: {}'.format(humanize_timedelta(today_total)),
-                   HUMANIZED_CURRENT_TIMEFRAMES[project.timeframe])
+        click.echo('{}: {}'.format(HUMANIZED_CURRENT_TIMEFRAMES[project.timeframe],
+                                   humanize_timedelta(today_total)))
 
 
 @streak.command(short_help='total time spent in streak')

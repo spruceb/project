@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import click
 import os
+import sys
 import atexit
 from traceback import print_exc
 from pprint import pformat
@@ -64,7 +65,10 @@ def char_input(prompt, last_invalid=False):
     if last_invalid:
         prompt = 'Invalid input. {}'.format(prompt)
     click.echo(prompt, nl=False)
-    result = click.getchar()
+    if sys.stdin.isatty():
+        result = click.getchar()
+    else:
+        result = sys.stdin.read(1)
     click.echo()
     if result in ('\x03', 'q'):
         raise KeyboardInterrupt()
@@ -402,7 +406,7 @@ def pause(context):
         return
     end = project.stop()
     click.echo('Paused')
-    click.pause()
+    click.pause(info='Press any key to continue...')
     start = project.start()
     click.echo('Restarted')
     click.echo('Paused for {}'.format(humanize_timedelta(start - end)))

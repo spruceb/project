@@ -4,8 +4,86 @@ import os
 import os.path
 from datetime import timedelta
 import pprint
+import pathlib
+import subprocess
+import shutil
 
 from date_point import DatePoint, Timeframe
+from utilities import current_directory
+
+class Manager:
+    """Base class for various resource managers"""
+
+    @classmethod
+    def default(cls):
+        """The default serialized value for this class"""
+        pass
+
+    @classmethod
+    def setup(cls):
+        """The method that sets up system, environment variables, files,
+        etc before first initialization"""
+        pass
+
+    def save(self):
+        """Writes an instance to its persistence location in a standard ways
+
+        May not be defined if another class is responsible for the persistence, i.e.
+        writes the frozen instance to a file of its choosing"""
+        pass
+
+    @classmethod
+    def to_dict(cls, **kwargs):
+        """Given the keyword arguments, constructs the desired dictionary"""
+        pass
+
+    def freeze(self):
+        """Returns the dictionary form of an instance"""
+        pass
+
+    @classmethod
+    def unfreeze(cls, **kwargs):
+        """Returns an instance from a configuration dictionary"""
+        pass
+
+    def configure(self, **kwargs):
+        """Sets instance variables from a dict"""
+        pass
+
+    @classmethod
+    def validate(cls, location):
+        """Checks that the given location has had setup called in it"""
+        pass
+
+
+
+class FileManager(Manager):
+    """General wrapper for file access and modification. Deals with backups"""
+
+    def __init__(self, directory, backups=True):
+        self.directory = os.path.realpath(directory)
+        self.backups = backups
+
+    def expand_path(self, path):
+        with current_directory(self.directory) as directory:
+            if
+    def create_file(self, )
+
+    @classmethod
+    def setup(cls, backups=True, directory=None):
+        if not backups:
+            return
+        with current_directory(directory) as directory:
+            if shutil.which('git') is None:
+                raise EnvironmentError('Git is not installed')
+            is_repo = subprocess.run(['git', 'rev-parse', '--is-inside-work-dir'],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if is_repo.returncode != 0: # isn't repo
+                init = subprocess.run(['git', 'init'], check=True)
+                if init.returncode != 0:
+                    raise EnvironmentError('Git init failed')
+            # assumed to have a valid repo at this point
+
 
 class DataManager:
     """Wraps the mechanism for persisting and querying work dates and times

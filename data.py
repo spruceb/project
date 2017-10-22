@@ -265,7 +265,11 @@ class ConfigManager:
     def configure(cls, data_config=None, cache_config=None,
                   timeframe=None, threshold=None):
         config_dict = cls.to_dict(data_config, cache_config, timeframe, threshold)
-        cls.merge_config(config_dict)
+        if not os.path.isfile(cls._config_filepath()):
+            with open(cls._config_filepath(), 'w') as config_file:
+                json.dump(config_dict, config_file)
+        else:
+            cls.merge_config(config_dict)
 
     @classmethod
     def _find_local(cls):
@@ -305,7 +309,7 @@ class ConfigManager:
         global_path = cls._find_global()
         if global_path is not None:
             return global_path, ConfigLocations.config
-        env = cls.find_env()
+        env = cls._find_env()
         if env is not None:
             return env, ConfigLocations.env
         raise FileNotFoundError("Can't find config files")
@@ -316,7 +320,7 @@ class ConfigManager:
 
     @classmethod
     def _config_location_type(cls):
-        return cls._config_location()[0]
+        return cls._config_location()[1]
 
     @classmethod
     def _config_filepath(cls):
@@ -383,8 +387,10 @@ class ConfigManager:
             config_location_type = ConfigLocations.config
         try:
             config_dir = cls._config_dirpath()
+            if cls._config_location_type() != config_location_type:
+                raise FileNotFoundError()
         except FileNotFoundError:
-            cls.create_config_location(config_location_type, filepath)
+            cls.create_config_location(config_location_type, dir_path=filepath)
             config_dir = cls._config_dirpath()
         config_filepath = cls._config_filepath()
         if os.path.isfile(config_filepath):
@@ -395,11 +401,12 @@ class ConfigManager:
                     cache_init = config['cache']
             except (json.decoder.JSONDecodeError, KeyError):
                 print('Invalid config found. Not overwriting.')
+                return
         else:
             data_init = DataManager.default()
             cache_init = CacheManager.default()
-            data_path = os.path.join(config_location, cls.DATA_DIRNAME)
-            cache_path = os.path.join(config_location, cls.CACHE_DIRNAME)
+            data_path = os.path.join(config_dir, cls.DATA_DIRNAME)
+            cache_path = os.path.join(config_dir, cls.CACHE_DIRNAME)
             if not os.path.isdir(cache_path):
                 os.mkdir(cache_path)
             if not os.path.isdir(data_path):
@@ -407,6 +414,6 @@ class ConfigManager:
             cache_init['path'] = cache_path
             data_init['path'] = data_path
 
-            cls.configure(data_config, cache_config)
+            cls.configure(data_init, cache_init)
         DataManager.setup(**data_init)
         CacheManager.setup(**cache_init)

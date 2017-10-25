@@ -1,22 +1,18 @@
 import datetime
 import arrow
 
+from python_utilities import Enum
 from utilities import binary_groupby
 
-class Timeframe:
+class Timeframe(Enum):
     """Enum for possible units of time"""
-    year = 'year'
-    month = 'month'
-    week = 'week'
-    day = 'day'
-    hour = 'hour'
-    minute = 'minute'
-    second = 'second'
-
-    @classmethod
-    def timeframes(cls):
-        return [attribute for attribute in dir(cls)
-                if not attribute.startswith('__')]
+    year = ()
+    month = ()
+    week = ()
+    day = ()
+    hour = ()
+    minute = ()
+    second = ()
 
 class DatePoint:
     """Wrapper around dates and date ranges"""

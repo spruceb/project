@@ -10,6 +10,7 @@ import shutil
 
 from date_point import DatePoint, Timeframe
 from utilities import current_directory
+from python_utilities import Enum
 
 class Manager:
     """Base class for various resource managers"""
@@ -63,11 +64,6 @@ class FileManager(Manager):
     def __init__(self, directory, backups=True):
         self.directory = os.path.realpath(directory)
         self.backups = backups
-
-    def expand_path(self, path):
-        with current_directory(self.directory) as directory:
-            if
-    def create_file(self, )
 
     @classmethod
     def setup(cls, backups=True, directory=None):
@@ -196,11 +192,11 @@ class CacheManager:
             with open(self.cache_path, 'w') as cache_file:
                 json.dump(self._cache, cache_file)
 
-class ConfigLocations:
+class ConfigLocations(Enum):
     """Enum for the different types of places config can be stored"""
-    config = 'config' # global config, i.e. in ~/.config
-    local = 'local' # local to a specific directory, so /some/path/.project
-    env = 'env' # a specific global location given by an environment variable
+    config = () # global config, i.e. in ~/.config
+    local = () # local to a specific directory, so /some/path/.project
+    env = () # a specific global location given by an environment variable
 
 
 class ConfigManager:

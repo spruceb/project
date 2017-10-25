@@ -192,7 +192,7 @@ def interactive_setup(context, param, value):
     else:
         timeframe = click.prompt(
             'What timeframe do you want to use?',
-            type=click.Choice(Timeframe.timeframes()),
+            type=click.Choice(list(Timeframe)),
             default=Timeframe.day)
         threshold = click.prompt(
             'What per-timeframe threshold do you want?',
@@ -208,7 +208,7 @@ def interactive_setup(context, param, value):
 @click.option('--local', '-l', 'location', flag_value=ConfigLocations.local)
 @click.option('--environment', '-e', 'location')
 @click.option('--finished-threshold', '-f', 'threshold', type=click.FLOAT)
-@click.option('--timeframe', '-t', type=click.Choice(Timeframe.timeframes()))
+@click.option('--timeframe', '-t', type=click.Choice(list(Timeframe)))
 @click.pass_context
 def setup(context, location, threshold, timeframe):
     """Set up a new project config location
@@ -335,7 +335,7 @@ def debug(context):
 
 @cli.group(invoke_without_command=True,
            short_help='TODO: let you change project settings')
-@click.option('--timeframe', type=click.Choice(Timeframe.timeframes()))
+@click.option('--timeframe', type=click.Choice(list(Timeframe)))
 @click.option('--finished-threshold', '-f', 'threshold', type=click.FLOAT)
 @click.pass_context
 def config(context, timeframe, threshold):
